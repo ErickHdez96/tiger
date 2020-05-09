@@ -1,0 +1,7 @@
+/*
+	This is a multiline
+	/*
+		Unterminated
+		/*
+			Nested comment
+		*/
