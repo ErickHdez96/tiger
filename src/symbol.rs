@@ -2,9 +2,9 @@
 //!
 //! This module handels the interning and lookup of [`String`]s.
 
-use std::mem;
-use std::collections::HashMap;
 use std::cell::RefCell;
+use std::collections::HashMap;
+use std::mem;
 
 /// A Symbol is a representation of an interned [`String`]. They allow faster string comparison, as
 /// it is only required to compare two [`u32`]s.
@@ -43,7 +43,7 @@ impl Symbol {
         // such, the interner will be initialized at startup and droped once the program
         // terminates. This means that the strings inside it can be expected to have a static
         // lifetime.
-        with_interner(|interner| unsafe { mem::transmute::<&str, &str>(interner.lookup(self)) } )
+        with_interner(|interner| unsafe { mem::transmute::<&str, &str>(interner.lookup(self)) })
     }
 }
 
@@ -57,7 +57,9 @@ struct Interner {
 
 impl Interner {
     fn new() -> Self {
-        Self { data: HashMap::new() }
+        Self {
+            data: HashMap::new(),
+        }
     }
 
     fn intern(&mut self, string: impl Into<String>) -> Symbol {
@@ -74,10 +76,13 @@ impl Interner {
     fn lookup(&self, symbol: Symbol) -> &str {
         for (key, value) in self.data.iter() {
             if symbol == *value {
-                return key
+                return key;
             }
         }
-        panic!("The given symbol {}, is not in the interner.", symbol.as_u32());
+        panic!(
+            "The given symbol {}, is not in the interner.",
+            symbol.as_u32()
+        );
     }
 }
 

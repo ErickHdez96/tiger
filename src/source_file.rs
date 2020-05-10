@@ -1,8 +1,8 @@
-use std::path::Path;
+use crate::{count_lines, Span};
 use std::borrow::Cow;
-use std::io;
 use std::fs;
-use crate::{Span, count_lines};
+use std::io;
+use std::path::Path;
 
 #[derive(Debug)]
 pub struct SourceFile<'a> {
@@ -13,10 +13,7 @@ pub struct SourceFile<'a> {
 impl<'a> SourceFile<'a> {
     pub fn from_path(path: &'a Path) -> io::Result<Self> {
         let content = fs::read_to_string(path)?;
-        Ok(Self {
-            path,
-            content,
-        })
+        Ok(Self { path, content })
     }
 
     pub fn input(&self) -> &str {

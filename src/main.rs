@@ -1,15 +1,7 @@
+use clap::{crate_authors, crate_description, crate_version, App, AppSettings, Arg, SubCommand};
 use std::io;
 use std::path::Path;
-use tiger::{tokenize, SourceFile, print_compiler_errors};
-use clap::{
-    App,
-    Arg,
-    SubCommand,
-    crate_authors,
-    crate_version,
-    crate_description,
-    AppSettings,
-};
+use tiger::{print_compiler_errors, tokenize, SourceFile};
 
 fn main() {
     let required_file_arg = Arg::with_name("INPUT")
@@ -24,11 +16,13 @@ fn main() {
         .version(crate_version!())
         .about(crate_description!())
         .arg(required_file_arg.clone())
-        .subcommand(SubCommand::with_name("lex")
-                    .about("runs the lexer and prints the lexemes and errors found")
-                    .version("0.1")
-                    .author(crate_authors!())
-                    .arg(required_file_arg))
+        .subcommand(
+            SubCommand::with_name("lex")
+                .about("runs the lexer and prints the lexemes and errors found")
+                .version("0.1")
+                .author(crate_authors!())
+                .arg(required_file_arg),
+        )
         .setting(AppSettings::ArgsNegateSubcommands)
         .setting(AppSettings::SubcommandsNegateReqs)
         .get_matches();
@@ -36,10 +30,14 @@ fn main() {
     let file_name;
     let mode;
     if let Some(matches) = matches.subcommand_matches("lex") {
-        file_name = matches.value_of("INPUT").expect("Argument configured wrongly");
+        file_name = matches
+            .value_of("INPUT")
+            .expect("Argument configured wrongly");
         mode = Mode::Lex;
     } else {
-        file_name = matches.value_of("INPUT").expect("Argument configured wrongly");
+        file_name = matches
+            .value_of("INPUT")
+            .expect("Argument configured wrongly");
         mode = Mode::All;
     }
 
@@ -56,7 +54,7 @@ fn run_main(path: impl AsRef<Path>, mode: Mode) -> io::Result<()> {
     print_compiler_errors(&errors, &source_file);
 
     if mode == Mode::Lex {
-        return Ok(())
+        return Ok(());
     }
 
     Ok(())

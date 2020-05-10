@@ -1,8 +1,8 @@
 //! Lexer module for the Tiger language.
 
-use std::str::Chars;
+use crate::{CompilerError, Span, Symbol, Token, TokenKind, T};
 use std::iter::Iterator;
-use crate::{Token, TokenKind, Span, T, Symbol, CompilerError};
+use std::str::Chars;
 
 /// Converts a string into a list of [`Token`]s.
 ///
@@ -100,7 +100,9 @@ impl<'a> Lexer<'a> {
         let mut start = 0;
         loop {
             match self.peek() {
-                ' ' | '\t' | '\n' | '\r' => { self.consume(); },
+                ' ' | '\t' | '\n' | '\r' => {
+                    self.consume();
+                }
                 '/' if self.nth_char(1) == '*' => {
                     if self.comment_depth == 0 {
                         start = self.pos;
@@ -108,28 +110,29 @@ impl<'a> Lexer<'a> {
                     self.consume();
                     self.consume();
                     self.comment_depth += 1;
-                },
+                }
                 '*' if self.nth_char(1) == '/' => {
                     self.consume();
                     self.consume();
                     self.comment_depth -= 1;
-                },
+                }
                 '\0' if self.comment_depth > 0 => {
                     let span = Span::new(start, self.pos);
-                    self.errors.push(
-                        LexerError::new(
-                            match self.comment_depth {
-                                1 => "There is one unclosed comment.".to_string(),
-                                d => format!("There are {} unclosed nested comments.", d),
-                            },
-                            span
-                        )
-                    );
+                    self.errors.push(LexerError::new(
+                        match self.comment_depth {
+                            1 => "There is one unclosed comment.".to_string(),
+                            d => format!("There are {} unclosed nested comments.", d),
+                        },
+                        span,
+                        span,
+                    ));
                     self.comment_depth = 0;
                     break;
-                },
+                }
                 _ if self.comment_depth == 0 => break,
-                _ => { self.consume(); },
+                _ => {
+                    self.consume();
+                }
             }
         }
     }
@@ -146,9 +149,7 @@ impl<'a> Lexer<'a> {
         }
 
         TokenKind::Number(Symbol::intern(
-            chars
-            .take((self.pos - start) as usize)
-            .collect::<String>()
+            chars.take((self.pos - start) as usize).collect::<String>(),
         ))
     }
 
@@ -164,9 +165,7 @@ impl<'a> Lexer<'a> {
         }
 
         TokenKind::from(Symbol::intern(
-            chars
-            .take((self.pos - start) as usize)
-            .collect::<String>()
+            chars.take((self.pos - start) as usize).collect::<String>(),
         ))
     }
 
@@ -188,21 +187,18 @@ impl<'a> Lexer<'a> {
             self.consume();
         }
 
-        let (literal, errors) = unescape_string(
-            chars
-            .take((self.pos - start) as usize)
-            .collect::<String>(),
-            start as usize
-        );
-        self.errors.extend(errors);
+        let mut literal = chars.take((self.pos - start) as usize).collect::<String>();
 
         if self.at_eof() {
-            self.errors.push(
-                LexerError::new(
-                    "Unexpected EOF while reading string.",
-                    Span::new(start - 1, self.pos)
-                )
-            );
+            self.errors.push(LexerError::new(
+                "Unexpected EOF while reading string.",
+                Span::new(start - 1, self.pos),
+                Span::new(self.pos - 1, self.pos),
+            ));
+        } else {
+            let (unescaped, errors) = unescape_string(literal, start as usize);
+            self.errors.extend(errors);
+            literal = unescaped;
         }
 
         // Consume the last `"`.
@@ -214,6 +210,8 @@ impl<'a> Lexer<'a> {
 
 /// Takes a &[`str`] without the outer quotes (`"`), and returns a [`String`] with all escaped
 /// sequences replaced, along with with any errors found.
+///
+/// `start` should be the position of the first character inside the string.
 fn unescape_string(literal: String, start: usize) -> (String, Vec<LexerError>) {
     let mut errors = vec![];
     if !literal.contains('\\') {
@@ -223,22 +221,26 @@ fn unescape_string(literal: String, start: usize) -> (String, Vec<LexerError>) {
     let mut out = String::with_capacity(literal.len());
     let mut chars = literal.chars();
     let mut literal_pos = 0;
+    // -1 because `start` is right after the double quote `"`.
+    // +2 due to the two enclosing `"`.
+    let string_span = Span::new(start as u32 - 1, literal.len() as u32 + 2);
 
     while let Some(current_char) = chars.next() {
         match current_char {
             '\\' => {
-                let (parsed_char, consumed_chars) = parse_escape_char(&mut chars, start + literal_pos);
+                let (parsed_char, consumed_chars) =
+                    parse_escape_char(&mut chars, string_span, start + literal_pos);
                 match parsed_char {
                     Ok(c) => out.push(c),
                     Err(e) => errors.push(e),
                 }
                 // Consumed characters plus `\`
                 literal_pos += consumed_chars as usize + 1;
-            },
+            }
             c => {
                 literal_pos += c.len_utf8();
                 out.push(c);
-            },
+            }
         }
     }
 
@@ -248,7 +250,11 @@ fn unescape_string(literal: String, start: usize) -> (String, Vec<LexerError>) {
 /// Parses a sequence following a backslash (`\`), returning the parsed character if the escape
 /// sequence is valid, or an error otherwise, along with the amount of characters consumed from the
 /// Chars iterator.
-fn parse_escape_char(chars: &mut Chars, initial_pos: usize) -> (Result<char, LexerError>, u8) {
+fn parse_escape_char(
+    chars: &mut Chars,
+    str_span: Span,
+    initial_pos: usize,
+) -> (Result<char, LexerError>, u8) {
     macro_rules! c {
         (eof) => { c!(eof 0) };
         // Number parsed is greater than 127, the last valid ASCII character.
@@ -257,6 +263,7 @@ fn parse_escape_char(chars: &mut Chars, initial_pos: usize) -> (Result<char, Lex
                 Err(
                     LexerError::new(
                         "Numeral escape sequence not a valid ASCII character",
+                        str_span,
                         Span::new(initial_pos as u32, 4)
                     ),
                 ),
@@ -271,6 +278,7 @@ fn parse_escape_char(chars: &mut Chars, initial_pos: usize) -> (Result<char, Lex
                 Err(
                     LexerError::new(
                         format!("Unexpected escape sequence: {}", $c),
+                        str_span,
                         // The + 1 is due to the previous `\`.
                         Span::new(initial_pos as u32, $c.len_utf8() as u32 + 1)
                     ),
@@ -285,6 +293,7 @@ fn parse_escape_char(chars: &mut Chars, initial_pos: usize) -> (Result<char, Lex
                 Err(
                     LexerError::new(
                         format!("Unexpected character while reading octal escape sequence: {}", $c),
+                        str_span,
                         Span::new(initial_pos as u32, $current_length + $c.len_utf8() as u32 + 1)
                     ),
                 ),
@@ -298,6 +307,7 @@ fn parse_escape_char(chars: &mut Chars, initial_pos: usize) -> (Result<char, Lex
                 Err(
                     LexerError::new(
                         format!("Unexpected character while reading hex escape sequence: {}", $c),
+                        str_span,
                         Span::new(initial_pos as u32, $current_length + $c.len_utf8() as u32 + 1)
                     ),
                 ),
@@ -311,6 +321,7 @@ fn parse_escape_char(chars: &mut Chars, initial_pos: usize) -> (Result<char, Lex
                 Err(
                     LexerError::new(
                         "Unexpected end of string while parsing escape sequence",
+                        str_span,
                         Span::new(initial_pos as u32, $len + 1)
                     ),
                 ),
@@ -337,7 +348,7 @@ fn parse_escape_char(chars: &mut Chars, initial_pos: usize) -> (Result<char, Lex
                         Ok(n) if n <= 127 => c!(n as char, 3),
                         _ => c!(invalid_sequence),
                     }
-                },
+                }
                 Some(c3) => c!(unexpected_octal c3, 2),
                 None => c!(eof 2),
             },
@@ -352,7 +363,7 @@ fn parse_escape_char(chars: &mut Chars, initial_pos: usize) -> (Result<char, Lex
                         Ok(n) if n <= 127 => c!(n as char, 3),
                         _ => c!(invalid_sequence),
                     }
-                },
+                }
                 Some(c2) => c!(unexpected_hex c2, 2),
                 None => c!(eof 2),
             },
@@ -399,7 +410,7 @@ impl<'a> Iterator for Lexer<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         use TokenKind as K;
         if self.at_eof() && self.has_returned_eof {
-            return None
+            return None;
         }
         self.skip_whitespace_and_comments();
 
@@ -429,7 +440,7 @@ impl<'a> Iterator for Lexer<'a> {
                     self.has_returned_eof = true;
                 }
                 kind_consume!(self, eof)
-            },
+            }
             '"' => self.eat_string(),
             c if c.is_ascii_digit() => self.eat_number(),
             c if is_ident_char(c, true) => self.eat_identifier(),
@@ -456,7 +467,7 @@ impl<'a> Iterator for Lexer<'a> {
 
                 self.consume();
                 kind
-            },
+            }
             c => K::Unknown(c),
         };
 
@@ -465,32 +476,44 @@ impl<'a> Iterator for Lexer<'a> {
 }
 
 fn is_ident_char(c: char, is_first_char: bool) -> bool {
-    (c >= 'a' && c <= 'z') ||
-        (c >= 'A' && c <= 'Z') ||
-        ((c >= '0' && c <= '9') && !is_first_char) ||
-        (c == '_' && !is_first_char)
+    (c >= 'a' && c <= 'z')
+        || (c >= 'A' && c <= 'Z')
+        || ((c >= '0' && c <= '9') && !is_first_char)
+        || (c == '_' && !is_first_char)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LexerError(String, Span);
+pub struct LexerError {
+    msg: String,
+    snippet_span: Span,
+    error_span: Span,
+}
 
 impl LexerError {
-    pub fn new(msg: impl Into<String>, span: Span) -> Self {
-        Self(msg.into(), span)
+    pub fn new(msg: impl Into<String>, snippet_span: Span, error_span: Span) -> Self {
+        Self {
+            msg: msg.into(),
+            snippet_span,
+            error_span,
+        }
     }
 
-    pub fn into_parts(self) -> (String, Span) {
-        (self.0, self.1)
+    pub fn into_parts(self) -> (String, Span, Span) {
+        (self.msg, self.snippet_span, self.error_span)
     }
 }
 
 impl CompilerError for LexerError {
     fn msg(&self) -> &str {
-        &self.0
+        &self.msg
     }
 
-    fn span(&self) -> Span {
-        self.1
+    fn snippet_span(&self) -> Span {
+        self.snippet_span
+    }
+
+    fn error_span(&self) -> Span {
+        self.snippet_span
     }
 }
 
@@ -627,7 +650,8 @@ mod tests {
             errors.into_iter().next().unwrap(),
             LexerError::new(
                 "There is one unclosed comment.".to_string(),
-                Span::new(0, input.len() as u32)
+                Span::new(0, input.len() as u32),
+                Span::new(0, input.len() as u32),
             ),
         );
     }
@@ -684,6 +708,7 @@ mod tests {
             errors.into_iter().next().unwrap(),
             LexerError::new(
                 "There are 2 unclosed nested comments.".to_string(),
+                Span::new(0, input.len() as u32),
                 Span::new(0, input.len() as u32)
             ),
         );
@@ -692,7 +717,7 @@ mod tests {
     #[test]
     fn test_strings() {
         let input = r"Normal string".to_string();
-        let (escaped_input, errors) = unescape_string(input.clone(), 0);
+        let (escaped_input, errors) = unescape_string(input.clone(), 1);
         assert!(errors.is_empty());
         assert_eq!(&input, &escaped_input);
     }
@@ -700,18 +725,12 @@ mod tests {
     #[test]
     fn test_basic_escaping() {
         let input = r#"\a\b\f\n\r\t\v\\\""#.to_string();
-        let (escaped_input, errors) = unescape_string(input, 0);
+        let (escaped_input, errors) = unescape_string(input, 1);
         let expected_output = vec![
-            7 as char,
-            8 as char,
-            12 as char,
-            '\n',
-            '\r',
-            '\t',
-            11 as char,
-            '\\',
-            '"',
-        ].into_iter().collect::<String>();
+            7 as char, 8 as char, 12 as char, '\n', '\r', '\t', 11 as char, '\\', '"',
+        ]
+        .into_iter()
+        .collect::<String>();
         assert!(errors.is_empty());
         assert_eq!(escaped_input, expected_output);
     }
@@ -719,14 +738,10 @@ mod tests {
     #[test]
     fn test_octal_numeral_escaping() {
         let input = r"\000 \177 \141".to_string();
-        let (escaped_input, errors) = unescape_string(input, 0);
-        let expected_output = vec![
-            0o000 as char,
-            ' ',
-            0o177 as char,
-            ' ',
-            0o141 as char,
-        ].into_iter().collect::<String>();
+        let (escaped_input, errors) = unescape_string(input, 1);
+        let expected_output = vec![0o000 as char, ' ', 0o177 as char, ' ', 0o141 as char]
+            .into_iter()
+            .collect::<String>();
         assert!(errors.is_empty());
         assert_eq!(escaped_input, expected_output);
     }
@@ -734,14 +749,10 @@ mod tests {
     #[test]
     fn test_hex_numeral_escaping() {
         let input = r"\x00 \x1F \x61".to_string();
-        let (escaped_input, errors) = unescape_string(input, 0);
-        let expected_output = vec![
-            0x00 as char,
-            ' ',
-            0x1F as char,
-            ' ',
-            0x61 as char,
-        ].into_iter().collect::<String>();
+        let (escaped_input, errors) = unescape_string(input, 1);
+        let expected_output = vec![0x00 as char, ' ', 0x1F as char, ' ', 0x61 as char]
+            .into_iter()
+            .collect::<String>();
         assert!(errors.is_empty());
         assert_eq!(escaped_input, expected_output);
     }
@@ -749,7 +760,7 @@ mod tests {
     #[test]
     fn test_single_errors_while_escaping_strings() {
         let input = r"\".to_string();
-        let (escaped_input, errors) = unescape_string(input, 0);
+        let (escaped_input, errors) = unescape_string(input, 1);
         let expected_output = "".to_string();
         assert_eq!(escaped_input, expected_output);
         assert_eq!(errors.len(), 1);
@@ -757,12 +768,13 @@ mod tests {
             errors.into_iter().next().unwrap(),
             LexerError::new(
                 "Unexpected end of string while parsing escape sequence",
-                Span::new(0, 1)
+                Span::new(0, 3),
+                Span::new(1, 1)
             ),
         );
 
         let input = r"\0".to_string();
-        let (escaped_input, errors) = unescape_string(input, 0);
+        let (escaped_input, errors) = unescape_string(input, 1);
         let expected_output = "".to_string();
         assert_eq!(escaped_input, expected_output);
         assert_eq!(errors.len(), 1);
@@ -770,12 +782,13 @@ mod tests {
             errors.into_iter().next().unwrap(),
             LexerError::new(
                 "Unexpected end of string while parsing escape sequence",
-                Span::new(0, 2)
+                Span::new(0, 4),
+                Span::new(1, 2)
             ),
         );
 
         let input = r"\00".to_string();
-        let (escaped_input, errors) = unescape_string(input, 0);
+        let (escaped_input, errors) = unescape_string(input, 1);
         let expected_output = "".to_string();
         assert_eq!(escaped_input, expected_output);
         assert_eq!(errors.len(), 1);
@@ -783,12 +796,13 @@ mod tests {
             errors.into_iter().next().unwrap(),
             LexerError::new(
                 "Unexpected end of string while parsing escape sequence",
-                Span::new(0, 3)
+                Span::new(0, 5),
+                Span::new(1, 3)
             ),
         );
 
         let input = r"\200".to_string();
-        let (escaped_input, errors) = unescape_string(input, 0);
+        let (escaped_input, errors) = unescape_string(input, 1);
         let expected_output = "".to_string();
         assert_eq!(escaped_input, expected_output);
         assert_eq!(errors.len(), 1);
@@ -796,12 +810,13 @@ mod tests {
             errors.into_iter().next().unwrap(),
             LexerError::new(
                 "Numeral escape sequence not a valid ASCII character",
-                Span::new(0, 4)
+                Span::new(0, 6),
+                Span::new(1, 4)
             ),
         );
 
         let input = r"\00ñ".to_string();
-        let (escaped_input, errors) = unescape_string(input, 0);
+        let (escaped_input, errors) = unescape_string(input, 1);
         let expected_output = "".to_string();
         assert_eq!(escaped_input, expected_output);
         assert_eq!(errors.len(), 1);
@@ -809,12 +824,13 @@ mod tests {
             errors.into_iter().next().unwrap(),
             LexerError::new(
                 "Unexpected character while reading octal escape sequence: ñ",
-                Span::new(0, 5)
+                Span::new(0, 7),
+                Span::new(1, 5)
             ),
         );
 
         let input = r"\xñ".to_string();
-        let (escaped_input, errors) = unescape_string(input, 0);
+        let (escaped_input, errors) = unescape_string(input, 1);
         let expected_output = "".to_string();
         assert_eq!(escaped_input, expected_output);
         assert_eq!(errors.len(), 1);
@@ -822,12 +838,13 @@ mod tests {
             errors.into_iter().next().unwrap(),
             LexerError::new(
                 "Unexpected character while reading hex escape sequence: ñ",
-                Span::new(0, 4)
+                Span::new(0, 6),
+                Span::new(1, 4)
             ),
         );
 
         let input = r"\xFñ".to_string();
-        let (escaped_input, errors) = unescape_string(input, 0);
+        let (escaped_input, errors) = unescape_string(input, 1);
         let expected_output = "".to_string();
         assert_eq!(escaped_input, expected_output);
         assert_eq!(errors.len(), 1);
@@ -835,12 +852,13 @@ mod tests {
             errors.into_iter().next().unwrap(),
             LexerError::new(
                 "Unexpected character while reading hex escape sequence: ñ",
-                Span::new(0, 5)
+                Span::new(0, 7),
+                Span::new(1, 5)
             ),
         );
 
         let input = r"\xFF".to_string();
-        let (escaped_input, errors) = unescape_string(input, 0);
+        let (escaped_input, errors) = unescape_string(input, 1);
         let expected_output = "".to_string();
         assert_eq!(escaped_input, expected_output);
         assert_eq!(errors.len(), 1);
@@ -848,12 +866,13 @@ mod tests {
             errors.into_iter().next().unwrap(),
             LexerError::new(
                 "Numeral escape sequence not a valid ASCII character",
-                Span::new(0, 4)
+                Span::new(0, 6),
+                Span::new(1, 4)
             ),
         );
 
         let input = r"\z".to_string();
-        let (escaped_input, errors) = unescape_string(input, 0);
+        let (escaped_input, errors) = unescape_string(input, 1);
         let expected_output = "".to_string();
         assert_eq!(escaped_input, expected_output);
         assert_eq!(errors.len(), 1);
@@ -861,7 +880,8 @@ mod tests {
             errors.into_iter().next().unwrap(),
             LexerError::new(
                 "Unexpected escape sequence: z",
-                Span::new(0, 2)
+                Span::new(0, 4),
+                Span::new(1, 2)
             ),
         );
     }
@@ -869,6 +889,7 @@ mod tests {
     #[test]
     fn test_multiple_string_escaping_errors() {
         let input = r"\o \200 \2ñ \xFñ \xFF \".to_string();
+        let input_span = Span::new(4, input.len() as u32 + 2);
         let (escaped_input, errors) = unescape_string(input, 5);
         let expected_output = "     ".to_string();
         assert_eq!(escaped_input, expected_output);
@@ -877,16 +898,14 @@ mod tests {
 
         assert_eq!(
             errors.next().unwrap(),
-            LexerError::new(
-                "Unexpected escape sequence: o",
-                Span::new(5, 2)
-            ),
+            LexerError::new("Unexpected escape sequence: o", input_span, Span::new(5, 2)),
         );
 
         assert_eq!(
             errors.next().unwrap(),
             LexerError::new(
                 "Numeral escape sequence not a valid ASCII character",
+                input_span,
                 Span::new(8, 4)
             ),
         );
@@ -895,6 +914,7 @@ mod tests {
             errors.next().unwrap(),
             LexerError::new(
                 "Unexpected character while reading octal escape sequence: ñ",
+                input_span,
                 Span::new(13, 4)
             ),
         );
@@ -903,6 +923,7 @@ mod tests {
             errors.next().unwrap(),
             LexerError::new(
                 "Unexpected character while reading hex escape sequence: ñ",
+                input_span,
                 Span::new(18, 5)
             ),
         );
@@ -911,6 +932,7 @@ mod tests {
             errors.next().unwrap(),
             LexerError::new(
                 "Numeral escape sequence not a valid ASCII character",
+                input_span,
                 Span::new(24, 4)
             ),
         );
@@ -919,6 +941,7 @@ mod tests {
             errors.next().unwrap(),
             LexerError::new(
                 "Unexpected end of string while parsing escape sequence",
+                input_span,
                 Span::new(29, 1)
             ),
         );
