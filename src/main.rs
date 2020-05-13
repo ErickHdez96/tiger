@@ -1,7 +1,11 @@
-use clap::{crate_authors, crate_description, crate_version, App, AppSettings, Arg, SubCommand};
+use clap::{crate_authors, crate_description, crate_version, App, Arg};
 use std::io;
 use std::path::Path;
-use tiger::{print_compiler_errors, tokenize, SourceFile};
+use tiger::{
+    parse, print_compiler_errors,
+    terminal::{Color, Style},
+    tokenize, SourceFile,
+};
 
 fn main() {
     let required_file_arg = Arg::with_name("INPUT")
@@ -16,53 +20,42 @@ fn main() {
         .version(crate_version!())
         .about(crate_description!())
         .arg(required_file_arg.clone())
-        .subcommand(
-            SubCommand::with_name("lex")
-                .about("runs the lexer and prints the lexemes and errors found")
-                .version("0.1")
-                .author(crate_authors!())
-                .arg(required_file_arg),
-        )
-        .setting(AppSettings::ArgsNegateSubcommands)
-        .setting(AppSettings::SubcommandsNegateReqs)
         .get_matches();
 
     let file_name;
-    let mode;
-    if let Some(matches) = matches.subcommand_matches("lex") {
-        file_name = matches
-            .value_of("INPUT")
-            .expect("Argument configured wrongly");
-        mode = Mode::Lex;
-    } else {
-        file_name = matches
-            .value_of("INPUT")
-            .expect("Argument configured wrongly");
-        mode = Mode::All;
-    }
+    file_name = matches
+        .value_of("INPUT")
+        .expect("Argument configured wrongly");
 
-    if let Err(e) = run_main(file_name, mode) {
+    if let Err(e) = run_main(file_name) {
         eprintln!("{}: {}", file_name, e);
         std::process::exit(1);
     }
 }
 
-fn run_main(path: impl AsRef<Path>, mode: Mode) -> io::Result<()> {
+fn run_main(path: impl AsRef<Path>) -> io::Result<()> {
     let source_file = SourceFile::from_path(path.as_ref())?;
 
-    let (_tokens, errors) = tokenize(source_file.input());
+    let (tokens, errors) = tokenize(source_file.input());
+    print_compiler_errors(&errors, &source_file);
+    let mut errors_found = !errors.is_empty();
+
+    let (item, errors) = parse(tokens);
+    errors_found |= !errors.is_empty();
+
+    if let Some(item) = item {
+        println!("{}", item);
+    }
     print_compiler_errors(&errors, &source_file);
 
-    if mode == Mode::Lex {
-        return Ok(());
+    if errors_found {
+        eprintln!(
+            "\n{}{}error:{} Could not compile due to the previous error(s).",
+            Color::Red,
+            Style::Bold,
+            Style::Clear,
+        );
     }
 
     Ok(())
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[repr(u8)]
-enum Mode {
-    Lex = 0,
-    All,
 }

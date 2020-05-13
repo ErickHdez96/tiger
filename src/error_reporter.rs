@@ -25,10 +25,12 @@ pub fn print_compiler_error(error: &impl CompilerError, source_file: &SourceFile
         Color::Clear,
         error.msg()
     );
-    let (snipet, start_line) = source_file.get_snippet(error.snippet_span());
-    let last_line = count_lines(&snipet) + start_line;
+    let snippet_span = error.snippet_span();
+    let error_span = error.error_span().relative_span(snippet_span);
+    let (snippet, start_line) = source_file.get_snippet(snippet_span);
+    let last_line = count_lines(&snippet) + start_line;
     let line_length = cmp::max(usize_length(last_line), 2);
-    let lines_count = cmp::max(last_line - start_line, 1);
+    let lines_count = last_line - start_line + if snippet.ends_with('\n') { 0 } else { 1 };
 
     eprintln!(
         "{}{}{}>{} {}",
@@ -40,9 +42,9 @@ pub fn print_compiler_error(error: &impl CompilerError, source_file: &SourceFile
     );
 
     if lines_count == 1 {
-        print_single_line_error(snipet, error.error_span(), start_line, line_length);
+        print_single_line_error(snippet, error_span, start_line, line_length);
     } else {
-        print_multiline_error(snipet, start_line, line_length);
+        print_multiline_error(snippet, start_line, line_length);
     }
 }
 
@@ -74,11 +76,12 @@ fn print_single_line_error(snipet: &str, span: Span, start_line: usize, line_len
         snipet,
     );
     eprintln!(
-        "{} {}{}| {}{}{}",
+        "{} {}{}| {}{}{}{}",
         " ".repeat(line_length),
         Color::Cyan,
         Style::Bold,
         Color::Red,
+        " ".repeat(span.offset() as usize),
         "^".repeat(span.len() as usize),
         Style::Clear
     );

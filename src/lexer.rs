@@ -16,7 +16,7 @@ use std::str::Chars;
 /// let mut tokens = tokens.into_iter();
 /// assert_eq!(tokens.next(), Some(Token::new(TokenKind::Comma, Span::new(0, 1))));
 /// assert_eq!(tokens.next(), Some(Token::new(TokenKind::Period, Span::new(1, 1))));
-/// assert_eq!(tokens.next(), Some(Token::new(TokenKind::Eof, Span::new(2, 1))));
+/// assert_eq!(tokens.next(), Some(Token::new(TokenKind::Eof, Span::new(1, 1))));
 /// assert_eq!(tokens.next(), None);
 /// ```
 pub fn tokenize(input: &str) -> (Vec<Token>, Vec<LexerError>) {
@@ -48,6 +48,7 @@ struct Lexer<'a> {
     /// escaped with `\`.
     previous_char: char,
     current_char: char,
+    last_non_whitespace_pos: u32,
 }
 
 impl<'a> Lexer<'a> {
@@ -60,6 +61,7 @@ impl<'a> Lexer<'a> {
             has_returned_eof: false,
             previous_char: '\0',
             current_char: '\0',
+            last_non_whitespace_pos: 0,
         }
     }
 
@@ -108,11 +110,13 @@ impl<'a> Lexer<'a> {
                         start = self.pos;
                     }
                     self.consume();
+                    self.last_non_whitespace_pos = self.pos;
                     self.consume();
                     self.comment_depth += 1;
                 }
                 '*' if self.nth_char(1) == '/' => {
                     self.consume();
+                    self.last_non_whitespace_pos = self.pos;
                     self.consume();
                     self.comment_depth -= 1;
                 }
@@ -131,6 +135,7 @@ impl<'a> Lexer<'a> {
                 }
                 _ if self.comment_depth == 0 => break,
                 _ => {
+                    self.last_non_whitespace_pos = self.pos;
                     self.consume();
                 }
             }
@@ -439,7 +444,10 @@ impl<'a> Iterator for Lexer<'a> {
                 if self.at_eof() {
                     self.has_returned_eof = true;
                 }
-                kind_consume!(self, eof)
+                return Some(Token::new(
+                    T![eof],
+                    Span::new(self.last_non_whitespace_pos, 1),
+                ));
             }
             '"' => self.eat_string(),
             c if c.is_ascii_digit() => self.eat_number(),
@@ -470,6 +478,7 @@ impl<'a> Iterator for Lexer<'a> {
             }
             c => K::Unknown(c),
         };
+        self.last_non_whitespace_pos = self.pos - 1;
 
         Some(Token::new(kind, Span::new(start, self.pos - start)))
     }
@@ -557,7 +566,7 @@ mod tests {
             tok!(T![&], 43, 1),
             tok!(T![|], 45, 1),
             tok!(T![:=], 47, 2),
-            tok!(T![eof], 49, 1),
+            tok!(T![eof], input.len() as u32 - 1, 1),
         ];
 
         assert_eq!(expected.len(), tokens.len());
@@ -576,7 +585,7 @@ mod tests {
             tok!(T![n Symbol::intern("0")], 0, 1),
             tok!(T![n Symbol::intern("500")], 2, 3),
             tok!(T![n Symbol::intern("1234567890")], 6, 10),
-            tok!(T![eof], 16, 1),
+            tok!(T![eof], input.len() as u32 - 1, 1),
         ];
 
         assert_eq!(expected.len(), tokens.len());
@@ -616,7 +625,7 @@ mod tests {
             tok!(T![extends], 106, 7),
             tok!(T![method], 114, 6),
             tok!(T![new], 121, 3),
-            tok!(T![eof], 124, 1),
+            tok!(T![eof], 123, 1),
         ];
 
         assert_eq!(tokens.len(), expected.len());
@@ -633,7 +642,7 @@ mod tests {
         assert_eq!(tokens.len(), 1, "Unexpected tokens returned");
         assert_eq!(
             tokens.into_iter().next().unwrap(),
-            tok!(T![eof], input.len() as u32, 1)
+            tok!(T![eof], input.len() as u32 - 1, 1)
         );
 
         let input = "/* Unterminated comment";
@@ -643,7 +652,7 @@ mod tests {
 
         assert_eq!(
             tokens.into_iter().next().unwrap(),
-            tok!(T![eof], input.len() as u32, 1)
+            tok!(T![eof], input.len() as u32 - 1, 1)
         );
 
         assert_eq!(
@@ -678,7 +687,7 @@ mod tests {
         assert_eq!(tokens.len(), 1, "Unexpected tokens returned");
         assert_eq!(
             tokens.into_iter().next().unwrap(),
-            tok!(T![eof], input.len() as u32, 1)
+            tok!(T![eof], input.len() as u32 - 1, 1)
         );
 
         let input = r"/*
@@ -694,14 +703,13 @@ mod tests {
         */
         Depth 2
 
-        Depth 1
-        ";
+        Depth 1";
         let (tokens, errors) = tokenize(&input);
         assert_eq!(errors.len(), 1, "Expected 1 error");
         assert_eq!(tokens.len(), 1, "Unexpected tokens returned");
         assert_eq!(
             tokens.into_iter().next().unwrap(),
-            tok!(T![eof], input.len() as u32, 1)
+            tok!(T![eof], input.len() as u32 - 1, 1)
         );
 
         assert_eq!(

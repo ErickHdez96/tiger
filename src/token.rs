@@ -134,6 +134,23 @@ impl TokenKind {
         }
     }
 
+    /// The Token can appear at the beginning of a declaration.
+    ///
+    /// The only tokens that can appear at the beginning of a declaration are: `type`, `class`,
+    /// `function`, `primitive`, `import`, and `var`.
+    ///
+    /// ```
+    /// use tiger::TokenKind;
+    ///
+    /// assert!(TokenKind::Type.can_start_declaration());
+    /// assert!(TokenKind::Class.can_start_declaration());
+    /// assert!(TokenKind::Function.can_start_declaration());
+    /// assert!(TokenKind::Primitive.can_start_declaration());
+    /// assert!(TokenKind::Import.can_start_declaration());
+    /// assert!(TokenKind::Var.can_start_declaration());
+    ///
+    /// assert!(!TokenKind::Let.can_start_declaration());
+    /// ```
     pub fn can_start_declaration(self) -> bool {
         use TokenKind::*;
 
@@ -143,6 +160,26 @@ impl TokenKind {
         }
     }
 
+    /// The Token can appear at the beginning of an expression.
+    ///
+    /// The only tokens that can appear at the beginning of an expression are: `nil`, `new`, `-`,
+    /// `(`, `if`, `while`, `for`, `break`, `let`, an `int`, a `string`, or an `identifier`.
+    ///
+    /// ```
+    /// use tiger::TokenKind;
+    ///
+    /// assert!(TokenKind::Nil.can_start_expression());
+    /// assert!(TokenKind::New.can_start_expression());
+    /// assert!(TokenKind::Minus.can_start_expression());
+    /// assert!(TokenKind::LParen.can_start_expression());
+    /// assert!(TokenKind::If.can_start_expression());
+    /// assert!(TokenKind::While.can_start_expression());
+    /// assert!(TokenKind::For.can_start_expression());
+    /// assert!(TokenKind::Break.can_start_expression());
+    /// assert!(TokenKind::Let.can_start_expression());
+    ///
+    /// assert!(!TokenKind::Var.can_start_expression());
+    /// ```
     pub fn can_start_expression(self) -> bool {
         use TokenKind::*;
 
@@ -153,6 +190,16 @@ impl TokenKind {
         }
     }
 
+    /// The Token can start either a declaration or an expression.
+    ///
+    /// `self.can_start_expression() || self.can_start_declaration()`
+    pub fn is_initial_token(self) -> bool {
+        self.can_start_expression() || self.can_start_declaration()
+    }
+
+    /// The name of the kind of the token, similar to `.to_string()`, except that
+    /// `TokenKind::Number` => `int`, `TokenKind::Literal` => `string`, `TokenKind::Ident` =>
+    /// `identifier`, and `TokenKind::Unknown` => `char`.
     pub fn kind_name(&self) -> String {
         use TokenKind::*;
 
@@ -180,7 +227,7 @@ impl TokenKind {
             And => "&",
             Or => "|",
             Assign => ":=",
-            Eof => "EOF",
+            Eof => "<eof>",
             Array => "array",
             If => "if",
             Then => "then",

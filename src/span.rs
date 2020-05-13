@@ -41,4 +41,23 @@ impl Span {
             len: (other.offset + other.len) - self.offset,
         }
     }
+
+    /// Given two absolute `Span`s, the first `Span` inside of the second `Span`, shifts the first
+    /// to be relative to the second one.
+    ///
+    /// For example:
+    /// ```
+    /// use tiger::Span;
+    ///
+    /// let outer_span = Span::new(10, 5);
+    /// let inner_span = Span::new(12, 3);
+    /// assert_eq!(inner_span.relative_span(outer_span), Span::new(2, 3));
+    /// ```
+    pub fn relative_span(self, other: Self) -> Self {
+        assert!(self.offset >= other.offset && self.offset + self.len <= other.offset + other.len);
+        Self {
+            offset: self.offset - other.offset,
+            len: self.len,
+        }
+    }
 }
