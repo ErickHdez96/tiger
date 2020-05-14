@@ -4,7 +4,7 @@ use std::path::Path;
 use tiger::{
     parse, print_compiler_errors,
     terminal::{Color, Style},
-    tokenize, SourceFile,
+    tokenize, translate, SourceFile,
 };
 
 fn main() {
@@ -43,9 +43,6 @@ fn run_main(path: impl AsRef<Path>) -> io::Result<()> {
     let (item, errors) = parse(tokens);
     errors_found |= !errors.is_empty();
 
-    if let Some(item) = item {
-        println!("{}", item);
-    }
     print_compiler_errors(&errors, &source_file);
 
     if errors_found {
@@ -55,6 +52,13 @@ fn run_main(path: impl AsRef<Path>) -> io::Result<()> {
             Style::Bold,
             Style::Clear,
         );
+    }
+
+    if let Some(item) = item {
+        match translate(item) {
+            Ok(e) => println!("{}", e),
+            Err(e) => print_compiler_errors(&[e], &source_file),
+        }
     }
 
     Ok(())

@@ -3,7 +3,7 @@ use std::fmt;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Item {
-    Exp(Exp),
+    Exp(Box<Exp>),
     Decs(Vec<Dec>),
 }
 
@@ -27,43 +27,22 @@ pub enum Dec {
         path: Symbol,
         span: Span,
     },
-    VarDec {
-        id: Identifier,
-        opt_type: Option<Identifier>,
-        exp: Box<Exp>,
-        span: Span,
-    },
-    FnDec {
-        id: Identifier,
-        params: Vec<TypeField>,
-        ret_type: Option<Identifier>,
-        body: Box<Exp>,
-        span: Span,
-    },
-    PrimitiveDec {
-        id: Identifier,
-        params: Vec<TypeField>,
-        ret_type: Option<Identifier>,
-        span: Span,
-    },
     Class {
         id: Identifier,
         extends: Option<Identifier>,
         fields: Vec<ClassField>,
         span: Span,
     },
-    TypeDec(TypeDec),
+    TypeDec(Box<TypeDec>),
+    VarDec(Box<VarDec>),
 }
 
 impl Dec {
     pub fn span(&self) -> Span {
         match self {
-            Dec::ImportDec { span, .. }
-            | Dec::VarDec { span, .. }
-            | Dec::FnDec { span, .. }
-            | Dec::PrimitiveDec { span, .. }
-            | Dec::Class { span, .. } => *span,
+            Dec::ImportDec { span, .. } | Dec::Class { span, .. } => *span,
             Dec::TypeDec(ty) => ty.span(),
+            Dec::VarDec(var) => var.span(),
         }
     }
 }
@@ -74,43 +53,6 @@ impl fmt::Display for Dec {
 
         match self {
             ImportDec { path, .. } => write!(f, r#"import "{}""#, path.as_str()),
-            VarDec {
-                id, opt_type, exp, ..
-            } => match opt_type {
-                Some(ty) => write!(f, "var {}: {} := {}", id, ty, exp),
-                None => write!(f, "var {} := {}", id, exp),
-            },
-            FnDec {
-                id,
-                params,
-                ret_type,
-                body,
-                ..
-            } => {
-                write!(f, "function {}(", id)?;
-                for (i, param) in params.iter().enumerate() {
-                    write!(f, "{}{}", if i == 0 { "" } else { ", " }, param)?;
-                }
-                match ret_type {
-                    Some(ty) => writeln!(f, "): {} =\n{}", ty, body),
-                    None => writeln!(f, ") =\n{}", body),
-                }
-            }
-            PrimitiveDec {
-                id,
-                params,
-                ret_type,
-                ..
-            } => {
-                write!(f, "primitive {}(", id)?;
-                for (i, param) in params.iter().enumerate() {
-                    write!(f, "{}{}", if i == 0 { "" } else { ", " }, param)?;
-                }
-                match ret_type {
-                    Some(ty) => writeln!(f, "): {}", ty),
-                    None => writeln!(f, ")"),
-                }
-            }
             Class {
                 id,
                 extends,
@@ -130,6 +72,7 @@ impl fmt::Display for Dec {
                 writeln!(f, "}}")
             }
             TypeDec(ty) => ty.fmt(f),
+            VarDec(var) => var.fmt(f),
         }
     }
 }
@@ -264,6 +207,85 @@ impl fmt::Display for TypeDec {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub enum VarDec {
+    Var {
+        id: Identifier,
+        opt_type: Option<Identifier>,
+        exp: Box<Exp>,
+        span: Span,
+    },
+    Fn {
+        id: Identifier,
+        params: Vec<TypeField>,
+        ret_type: Option<Identifier>,
+        body: Box<Exp>,
+        span: Span,
+    },
+    Primitive {
+        id: Identifier,
+        params: Vec<TypeField>,
+        ret_type: Option<Identifier>,
+        span: Span,
+    },
+}
+
+impl VarDec {
+    pub fn span(&self) -> Span {
+        match self {
+            VarDec::Var { span, .. } | VarDec::Fn { span, .. } | VarDec::Primitive { span, .. } => {
+                *span
+            }
+        }
+    }
+}
+
+impl fmt::Display for VarDec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use VarDec::*;
+
+        match self {
+            Var {
+                id, opt_type, exp, ..
+            } => match opt_type {
+                Some(ty) => write!(f, "var {}: {} := {}", id, ty, exp),
+                None => write!(f, "var {} := {}", id, exp),
+            },
+            Fn {
+                id,
+                params,
+                ret_type,
+                body,
+                ..
+            } => {
+                write!(f, "function {}(", id)?;
+                for (i, param) in params.iter().enumerate() {
+                    write!(f, "{}{}", if i == 0 { "" } else { ", " }, param)?;
+                }
+                match ret_type {
+                    Some(ty) => writeln!(f, "): {} =\n{}", ty, body),
+                    None => writeln!(f, ") =\n{}", body),
+                }
+            }
+            Primitive {
+                id,
+                params,
+                ret_type,
+                ..
+            } => {
+                write!(f, "primitive {}(", id)?;
+                for (i, param) in params.iter().enumerate() {
+                    write!(f, "{}{}", if i == 0 { "" } else { ", " }, param)?;
+                }
+                match ret_type {
+                    Some(ty) => writeln!(f, "): {}", ty),
+                    None => writeln!(f, ")"),
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum Exp {
     LetExp {
         decs: Vec<Dec>,
@@ -300,8 +322,12 @@ pub enum Exp {
         members: Vec<Member>,
         span: Span,
     },
+    Exps {
+        exps: Vec<Exp>,
+        span: Span,
+    },
 
-    LValue(LValue),
+    LValue(Box<LValue>),
     Identifier(Identifier),
     AssignExp {
         lvalue: Box<LValue>,
@@ -323,6 +349,7 @@ pub enum Exp {
         left: Box<Exp>,
         right: Box<Exp>,
         span: Span,
+        op_span: Span,
     },
     UnaryExp {
         exp: Box<Exp>,
@@ -355,6 +382,7 @@ impl Exp {
             | IfExp { span, .. }
             | WhileExp { span, .. }
             | ForExp { span, .. }
+            | Exps { span, .. }
             | NewRecordExp { span, .. }
             | NewArrayExp { span, .. }
             | AssignExp { span, .. }
@@ -379,6 +407,7 @@ impl Exp {
             | IfExp { ref mut span, .. }
             | WhileExp { ref mut span, .. }
             | ForExp { ref mut span, .. }
+            | Exps { ref mut span, .. }
             | NewRecordExp { ref mut span, .. }
             | NewArrayExp { ref mut span, .. }
             | AssignExp { ref mut span, .. }
@@ -406,11 +435,13 @@ impl fmt::Display for Exp {
                 for dec in decs.iter() {
                     dec.fmt(f)?;
                 }
+
                 writeln!(f, "in")?;
                 for exp in exps.iter() {
                     exp.fmt(f)?;
                 }
-                write!(f, "end")
+
+                writeln!(f, "end")
             }
             Exp::AssignExp { lvalue, exp, .. } => write!(f, "{} := {}", lvalue, exp),
             Exp::BinExp {
@@ -420,7 +451,20 @@ impl fmt::Display for Exp {
             Exp::LValue(lvalue) => lvalue.fmt(f),
             Exp::Identifier(id) => id.fmt(f),
             Exp::StringExp { value, .. } => write!(f, r#""{}""#, value.as_str()),
-            _ => write!(f, ""),
+            Exp::Exps { exps, .. } => {
+                for (i, exp) in exps.iter().enumerate() {
+                    write!(f, "{}{}", if i == 0 { "" } else { "; " }, exp)?;
+                }
+                Ok(())
+            }
+            Exp::FnCall { lvalue, args, .. } => {
+                write!(f, "{}(", lvalue)?;
+                for (i, arg) in args.iter().enumerate() {
+                    write!(f, "{}{}", if i == 0 { "" } else { ", " }, arg)?;
+                }
+                write!(f, ")")
+            }
+            e => todo!("{:?}", e),
         }
     }
 }
@@ -525,17 +569,29 @@ impl fmt::Display for Identifier {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
+    /// +
     Plus,
+    /// -
     Minus,
+    /// *
     Times,
+    /// /
     Div,
+    /// =
     Eq,
+    /// <>
     Neq,
+    /// >
     Gt,
+    /// <
     Lt,
+    /// >=
     Gte,
+    /// <=
     Lte,
+    /// &
     And,
+    /// |
     Or,
 }
 
@@ -552,6 +608,36 @@ impl BinOp {
             Gte | Lte | Eq | Neq | Gt | Lt => 3,
             Plus | Minus => 4,
             Times | Div => 5,
+        }
+    }
+
+    /// Check if the operator is one of `+`, `-`, `*`, or `/`.
+    pub fn is_arithmetic(self) -> bool {
+        match self {
+            BinOp::Plus | BinOp::Minus | BinOp::Times | BinOp::Div => true,
+            _ => false,
+        }
+    }
+
+    /// Check if the operator is either `=`, or `<>`.
+    pub fn is_equality(self) -> bool {
+        self == BinOp::Eq || self == BinOp::Neq
+    }
+
+    /// Check if the operator is one of `=`, `<>`, `<`, `>`, `<=`, or `>=`.
+    pub fn is_comparison(self) -> bool {
+        match self {
+            BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte => true,
+            _ => false,
+        }
+    }
+
+    /// Get the length of the token in bytes.
+    pub fn char_len(self) -> usize {
+        if self == BinOp::Neq || self == BinOp::Gte || self == BinOp::Lte {
+            2
+        } else {
+            1
         }
     }
 }
@@ -588,29 +674,29 @@ macro_rules! IK {
         }
     };
     (var, $id:expr, $type:expr, $exp:expr, $offset:expr, $length:expr) => {
-        Dec::VarDec {
+        Dec::VarDec(Box::new(VarDec::Var {
             id: $id,
             opt_type: $type,
             exp: Box::new($exp),
             span: Span::new($offset as u32, $length as u32),
-        }
+        }))
     };
     (fn, $id:expr, $params:expr, $ret_type:expr, $body:expr, $offset:expr, $length:expr) => {
-        Dec::FnDec {
+        Dec::VarDec(Box::new(VarDec::Fn {
             id: $id,
             params: $params,
             ret_type: $ret_type,
             body: Box::new($body),
             span: Span::new($offset as u32, $length as u32),
-        }
+        }))
     };
     (primitive, $id:expr, $params:expr, $ret_type:expr, $offset:expr, $length:expr) => {
-        Dec::PrimitiveDec {
+        Dec::VarDec(Box::new(VarDec::Primitive {
             id: $id,
             params: $params,
             ret_type: $ret_type,
             span: Span::new($offset as u32, $length as u32),
-        }
+        }))
     };
     (class, $id:expr, $extends:expr, $fields:expr, $offset:expr, $length:expr) => {
         Dec::Class {
@@ -645,7 +731,7 @@ macro_rules! IK {
         }
     };
     (typedec, $type:expr) => {
-        Dec::TypeDec($type)
+        Dec::TypeDec(Box::new($type))
     };
 
     (typename, $id:expr, $type:expr, $offset:expr, $length:expr) => {
@@ -800,7 +886,7 @@ macro_rules! IK {
         }
     };
     (explvalue, $lvalue:expr) => {
-        Exp::LValue($lvalue)
+        Exp::LValue(Box::new($lvalue))
     };
     (lvalue, $ident:expr) => {
         LValue::Identifier($ident)
@@ -819,30 +905,37 @@ macro_rules! IK {
             span: Span::new($offset as u32, $length as u32),
         }
     };
+    (exps, $exps:expr, $offset:expr, $length:expr) => {
+        Exp::Exps {
+            exps: $exps,
+            span: Span::new($offset as u32, $length as u32),
+        }
+    };
     (-, $exp:expr, $offset:expr, $length:expr) => {
         Exp::UnaryExp {
             exp: Box::new($exp),
             span: Span::new($offset as u32, $length as u32),
         }
     };
-    (+, $left:expr, $right:expr, $offset:expr, $length:expr) => {
-        IK![BinOp::Plus, $left, $right, $offset, $length]
+    (+, $left:expr, $right:expr, $offset:expr, $length:expr, $op_offset:expr) => {
+        IK![BinOp::Plus, $left, $right, $offset, $length, $op_offset]
     };
-    (-, $left:expr, $right:expr, $offset:expr, $length:expr) => {
-        IK![BinOp::Minus, $left, $right, $offset, $length]
+    (-, $left:expr, $right:expr, $offset:expr, $length:expr, $op_offset:expr) => {
+        IK![BinOp::Minus, $left, $right, $offset, $length, $op_offset]
     };
-    (*, $left:expr, $right:expr, $offset:expr, $length:expr) => {
-        IK![BinOp::Times, $left, $right, $offset, $length]
+    (*, $left:expr, $right:expr, $offset:expr, $length:expr, $op_offset:expr) => {
+        IK![BinOp::Times, $left, $right, $offset, $length, $op_offset]
     };
-    (/, $left:expr, $right:expr, $offset:expr, $length:expr) => {
-        IK![BinOp::Div, $left, $right, $offset, $length]
+    (/, $left:expr, $right:expr, $offset:expr, $length:expr, $op_offset:expr) => {
+        IK![BinOp::Div, $left, $right, $offset, $length, $op_offset]
     };
-    ($op:expr, $left:expr, $right:expr, $offset:expr, $length:expr) => {
+    ($op:expr, $left:expr, $right:expr, $offset:expr, $length:expr, $op_offset:expr) => {
         Exp::BinExp {
             op: $op,
             left: Box::new($left),
             right: Box::new($right),
             span: Span::new($offset as u32, $length as u32),
+            op_span: Span::new($op_offset as u32, $op.char_len() as u32),
         }
     };
 }

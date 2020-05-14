@@ -1,5 +1,5 @@
 use super::Parser;
-use crate::ast::{ClassField, Dec, Identifier, TypeDec, TypeField};
+use crate::ast::{ClassField, Dec, Identifier, TypeDec, TypeField, VarDec};
 use crate::{Span, TokenKind, IK, T};
 
 impl Parser {
@@ -370,7 +370,7 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{BinOp, Exp, Item, LValue, TypeField};
+    use crate::ast::{BinOp, Exp, Item, LValue, TypeField, VarDec};
     use crate::{parse, tokenize, Symbol};
 
     macro_rules! item {
@@ -439,7 +439,7 @@ mod tests {
             explvalue,
             IK![lvalue, IK![ident, Symbol::intern("y"), 40, 1]]
         ];
-        let body = IK![+, x_body, y_body, 36, 5];
+        let body = IK![+, x_body, y_body, 36, 5, 38];
 
         assert_eq!(
             item,
@@ -574,7 +574,7 @@ mod tests {
         let int_1 = IK![ident, int_s, 34, 3];
         let int_2 = IK![ident, int_s, 40, 3];
         let x_param = IK![tyfield, x_1, int_1, 31, 6];
-        let body = IK![*, x_2, x_3, 46, 5];
+        let body = IK![*, x_2, x_3, 46, 5, 48];
         let method = IK![classfn, sqr, vec![x_param], Some(int_2), body, 20, 31];
 
         assert_eq!(

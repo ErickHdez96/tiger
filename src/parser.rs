@@ -41,7 +41,7 @@ impl Parser {
             Some(Item::Decs(self.parse_decs()?))
         } else if self.peek().kind().can_start_expression() {
             self.start = self.peek().span();
-            Some(Item::Exp(self.parse_exp(0)?))
+            Some(Item::Exp(Box::new(self.parse_exp(0)?)))
         } else {
             None
         }
@@ -142,7 +142,7 @@ impl Parser {
     }
 
     /// Eats the next token if it is a binary operator with a higher precedence than `precedence`.
-    fn eat_op_with_precedence(&mut self, precedence: usize) -> Option<BinOp> {
+    fn eat_op_with_precedence(&mut self, precedence: usize) -> Option<(BinOp, Span)> {
         let op = match self.peek().kind() {
             TokenKind::Plus => BinOp::Plus,
             TokenKind::Minus => BinOp::Minus,
@@ -160,8 +160,8 @@ impl Parser {
         };
 
         if precedence < op.precedence() {
-            self.advance();
-            Some(op)
+            let span = self.advance().span();
+            Some((op, span))
         } else {
             None
         }
@@ -317,12 +317,12 @@ mod tests {
 
         assert_eq!(
             errors.next().expect("Expected one error"),
-            E!("Expected `:=`, found `int`", (0, 5), (4, 1))
+            E!("Expected `:=`, found `int`", (0, 7), (6, 1))
         );
 
         assert_eq!(
             errors.next().expect("Expected one error"),
-            E!("Expected an expression, found `do`", (0, 9), (8, 1))
+            E!("Expected an expression, found `do`", (0, 13), (11, 2))
         );
     }
 }

@@ -3,6 +3,7 @@
 //! manual](https://www.lrde.epita.fr/~tiger/tiger.html).
 
 pub mod ast;
+mod env;
 pub mod error_reporter;
 pub mod lexer;
 pub mod parser;
@@ -11,6 +12,8 @@ pub mod span;
 pub mod symbol;
 pub mod terminal;
 pub mod token;
+pub mod semant;
+mod types;
 
 pub use ast::Item;
 pub use error_reporter::{print_compiler_errors, CompilerError};
@@ -20,6 +23,7 @@ pub use source_file::SourceFile;
 pub use span::Span;
 pub use symbol::Symbol;
 pub use token::{Token, TokenKind};
+pub use semant::translate;
 
 pub fn count_lines(s: &str) -> usize {
     s.as_bytes()

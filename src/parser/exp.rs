@@ -84,8 +84,18 @@ impl Parser {
             }
             // `(` exp `)`
             T!['('] => {
-                let start = self.advance().span();
+                let mut start = self.advance().span();
                 let mut exp = self.parse_exp(BinOp::MIN_PRECEDENCE)?;
+                if self.peek().kind() == T![;] {
+                    let mut exps = vec![exp];
+                    while self.peek().kind() == T![;] {
+                        self.advance();
+                        let exp = self.parse_exp(0)?;
+                        start = start.extend(exp.span());
+                        exps.push(exp);
+                    }
+                    exp = IK![exps, exps, start.offset(), start.len()]
+                }
                 let end = self.eat(T![')'])?.span();
                 exp.set_span(start.extend(end));
                 Some(exp)
@@ -108,10 +118,10 @@ impl Parser {
             }
         }?;
 
-        while let Some(op) = self.eat_op_with_precedence(precedence) {
+        while let Some((op, op_span)) = self.eat_op_with_precedence(precedence) {
             let right = self.parse_exp(op.precedence())?;
             let end = start.extend(right.span());
-            left = IK![op, left, right, end.offset(), end.len()];
+            left = IK![op, left, right, end.offset(), end.len(), op_span.offset()];
         }
 
         Some(left)
@@ -143,6 +153,7 @@ impl Parser {
 
         let mut exps = vec![self.parse_exp(0)?];
         while self.peek().kind() == T![;] {
+            self.advance();
             exps.push(self.parse_exp(0)?);
         }
         Some(exps)
@@ -357,12 +368,12 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{BinOp, Item};
+    use crate::ast::Item;
     use crate::{parse, tokenize, Symbol, IK};
 
     macro_rules! item {
         ($item:expr) => {
-            Item::Exp($item)
+            Item::Exp(Box::new($item))
         };
     }
 
@@ -465,7 +476,7 @@ mod tests {
         let left = IK![int, Symbol::intern("3"), 0, 1];
         let right = IK![int, Symbol::intern("3"), 4, 1];
 
-        assert_eq!(item, item!(IK![+, left, right, 0, input.len()]));
+        assert_eq!(item, item!(IK![+, left, right, 0, input.len(), 2]));
 
         let input = "3 - 3";
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
@@ -473,7 +484,7 @@ mod tests {
         let left = IK![int, Symbol::intern("3"), 0, 1];
         let right = IK![int, Symbol::intern("3"), 4, 1];
 
-        assert_eq!(item, item!(IK![-, left, right, 0, input.len()]));
+        assert_eq!(item, item!(IK![-, left, right, 0, input.len(), 2]));
 
         let input = "3 * 3";
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
@@ -481,7 +492,7 @@ mod tests {
         let left = IK![int, Symbol::intern("3"), 0, 1];
         let right = IK![int, Symbol::intern("3"), 4, 1];
 
-        assert_eq!(item, item!(IK![*, left, right, 0, input.len()]));
+        assert_eq!(item, item!(IK![*, left, right, 0, input.len(), 2]));
 
         let input = "3 / 3";
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
@@ -489,7 +500,7 @@ mod tests {
         let left = IK![int, Symbol::intern("3"), 0, 1];
         let right = IK![int, Symbol::intern("3"), 4, 1];
 
-        assert_eq!(item, item!(IK![/, left, right, 0, input.len()]));
+        assert_eq!(item, item!(IK![/, left, right, 0, input.len(), 2]));
     }
 
     #[test]
@@ -503,7 +514,7 @@ mod tests {
 
         assert_eq!(
             item,
-            item!(IK![+, left, IK![*, mid, right, 4, 5], 0, input.len()])
+            item!(IK![+, left, IK![*, mid, right, 4, 5, 6], 0, input.len(), 2])
         );
 
         let input = "1 - 2 - 3";
@@ -515,7 +526,7 @@ mod tests {
 
         assert_eq!(
             item,
-            item!(IK![-, IK![-, left, mid, 0, 5], right, 0, input.len()])
+            item!(IK![-, IK![-, left, mid, 0, 5, 2], right, 0, input.len(), 6])
         );
     }
 
@@ -527,7 +538,7 @@ mod tests {
         let left = IK![-, IK![int, Symbol::intern("1"), 1, 1], 0, 2];
         let right = IK![int, Symbol::intern("2"), 5, 1];
 
-        assert_eq!(item, item!(IK![+, left, right, 0, input.len()]));
+        assert_eq!(item, item!(IK![+, left, right, 0, input.len(), 3]));
 
         let input = "---1";
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
@@ -546,7 +557,7 @@ mod tests {
         let n2 = IK![int, Symbol::intern("2"), 5, 1];
         let right = IK![-, n2, 4, 2];
 
-        assert_eq!(item, item!(IK![*, n1, right, 0, input.len()]));
+        assert_eq!(item, item!(IK![*, n1, right, 0, input.len(), 2]));
     }
 
     #[test]
@@ -557,10 +568,10 @@ mod tests {
         let n1 = IK![int, Symbol::intern("1"), 0, 1];
         let n2 = IK![int, Symbol::intern("2"), 7, 1];
         let n3 = IK![int, Symbol::intern("3"), 11, 1];
-        let paren = IK![-, n2, n3, 5, 9];
+        let paren = IK![-, n2, n3, 5, 9, 9];
         let minus_paren = IK![-, paren, 4, 10];
 
-        assert_eq!(item, item!(IK![*, n1, minus_paren, 0, input.len()]));
+        assert_eq!(item, item!(IK![*, n1, minus_paren, 0, input.len(), 2]));
     }
 
     #[test]
