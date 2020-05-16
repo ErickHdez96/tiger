@@ -84,7 +84,21 @@ pub struct TypeField {
     pub span: Span,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct FunctionField {
+    pub id: Identifier,
+    pub type_id: Identifier,
+    pub escapes: bool,
+    pub span: Span,
+}
+
 impl fmt::Display for TypeField {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.id, self.type_id)
+    }
+}
+
+impl fmt::Display for FunctionField {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.id, self.type_id)
     }
@@ -212,11 +226,12 @@ pub enum VarDec {
         id: Identifier,
         opt_type: Option<Identifier>,
         exp: Box<Exp>,
+        escapes: bool,
         span: Span,
     },
     Fn {
         id: Identifier,
-        params: Vec<TypeField>,
+        params: Vec<FunctionField>,
         ret_type: Option<Identifier>,
         body: Box<Exp>,
         span: Span,
@@ -305,6 +320,7 @@ pub enum Exp {
     },
     ForExp {
         id: Identifier,
+        id_escapes: bool,
         from: Box<Exp>,
         to: Box<Exp>,
         do_exp: Box<Exp>,
@@ -678,6 +694,7 @@ macro_rules! IK {
             id: $id,
             opt_type: $type,
             exp: Box::new($exp),
+            escapes: false,
             span: Span::new($offset as u32, $length as u32),
         }))
     };
@@ -710,6 +727,14 @@ macro_rules! IK {
         TypeField {
             id: $id,
             type_id: $type,
+            span: Span::new($offset as u32, $length as u32),
+        }
+    };
+    (fnfield, $id:expr, $type:expr, $offset:expr, $length:expr) => {
+        FunctionField {
+            id: $id,
+            type_id: $type,
+            escapes: false,
             span: Span::new($offset as u32, $length as u32),
         }
     };
@@ -833,6 +858,7 @@ macro_rules! IK {
     (for, $id:expr, $from:expr, $to:expr, $do:expr, $offset:expr, $length:expr) => {
         Exp::ForExp {
             id: $id,
+            id_escapes: false,
             from: Box::new($from),
             to: Box::new($to),
             do_exp: Box::new($do),

@@ -1,13 +1,14 @@
 use super::{TResult, TranslateError, Translator, Types};
 use crate::ast::TypeDec;
+use crate::frame::Frame;
 use crate::types::{RecordMember, TigerType};
 use crate::{terr, Span};
 use std::rc::Rc;
 
-impl Translator {
-    pub fn translate_type<'a>(
+impl<F: Frame> Translator<F> {
+    pub fn translate_type<'env>(
         &self,
-        types: &'a Types,
+        types: &'env Types,
         type_dec: &TypeDec,
     ) -> TResult<Rc<TigerType>> {
         match type_dec {

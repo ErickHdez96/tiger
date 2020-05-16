@@ -1,5 +1,5 @@
 use super::Parser;
-use crate::ast::{ClassField, Dec, Identifier, TypeDec, TypeField, VarDec};
+use crate::ast::{ClassField, Dec, FunctionField, Identifier, TypeDec, TypeField, VarDec};
 use crate::{Span, TokenKind, IK, T};
 
 impl Parser {
@@ -155,7 +155,11 @@ impl Parser {
             IK![ident, id, span.offset(), span.len()]
         };
         self.eat(T!['('])?;
-        let type_fields = self.parse_type_fields()?;
+        let type_fields = self
+            .parse_type_fields()?
+            .into_iter()
+            .map(|f| IK![fnfield, f.id, f.type_id, f.span.offset(), f.span.len()])
+            .collect::<Vec<_>>();
         self.eat(T![')'])?;
 
         let ret_type = if self.peek().kind() == T![:] {
@@ -416,7 +420,7 @@ mod tests {
         let fn_name = IK![ident, Symbol::intern("add"), 9, 3];
         let x_int = IK![ident, Symbol::intern("int"), 16, 3];
         let x = IK![
-            tyfield,
+            fnfield,
             IK![ident, Symbol::intern("x"), 13, 1],
             x_int,
             13,
@@ -424,7 +428,7 @@ mod tests {
         ];
         let y_int = IK![ident, Symbol::intern("int"), 24, 3];
         let y = IK![
-            tyfield,
+            fnfield,
             IK![ident, Symbol::intern("y"), 21, 1],
             y_int,
             21,

@@ -5,25 +5,29 @@
 pub mod ast;
 mod env;
 pub mod error_reporter;
+pub mod escapes;
+pub mod frame;
 pub mod lexer;
 pub mod parser;
+pub mod semant;
 pub mod source_file;
 pub mod span;
 pub mod symbol;
+mod temp;
 pub mod terminal;
 pub mod token;
-pub mod semant;
+mod translate;
 mod types;
 
 pub use ast::Item;
 pub use error_reporter::{print_compiler_errors, CompilerError};
 pub use lexer::tokenize;
 pub use parser::parse;
+pub use semant::translate;
 pub use source_file::SourceFile;
 pub use span::Span;
 pub use symbol::Symbol;
 pub use token::{Token, TokenKind};
-pub use semant::translate;
 
 pub fn count_lines(s: &str) -> usize {
     s.as_bytes()

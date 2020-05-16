@@ -1,4 +1,6 @@
 use crate::ast::BinOp;
+use crate::frame::Frame;
+use crate::translate::{Access, Level};
 use crate::Symbol;
 use std::cmp::{Eq, PartialEq};
 use std::fmt;
@@ -154,16 +156,32 @@ impl fmt::Display for RecordMember {
 }
 
 #[derive(Debug)]
-pub enum VarType {
-    Var(Rc<TigerType>),
-    Fn(Vec<Rc<TigerType>>, Rc<TigerType>),
+pub enum VarType<F: Frame> {
+    Var {
+        ty: Rc<TigerType>,
+        access: Access<F>,
+    },
+    Fn {
+        formals: Vec<Rc<TigerType>>,
+        ty: Rc<TigerType>,
+        level: Level<F>,
+    },
 }
 
-impl VarType {
+impl<F: Frame> VarType<F> {
+    /// Create a new variable declaration with the given type and access.
+    pub fn new_var(ty: Rc<TigerType>, access: Access<F>) -> Self {
+        Self::Var { ty, access }
+    }
+
+    pub fn new_fn(formals: Vec<Rc<TigerType>>, ty: Rc<TigerType>, level: Level<F>) -> Self {
+        Self::Fn { formals, ty, level }
+    }
+
     pub fn get_type(&self) -> Rc<TigerType> {
         match self {
-            VarType::Var(ty) => Rc::clone(ty),
-            VarType::Fn(_, ty) => Rc::clone(ty),
+            VarType::Var { ty, .. } => Rc::clone(ty),
+            VarType::Fn { ty, .. } => Rc::clone(ty),
         }
     }
 }

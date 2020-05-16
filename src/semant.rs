@@ -4,12 +4,14 @@ mod ty;
 
 use crate::env::Env;
 use crate::error_reporter::CompilerError;
+use crate::frame::Frame;
+use crate::translate::{self, Level};
 use crate::types::{TigerType, VarType};
 use crate::{Item, Span, Symbol};
 use std::fmt;
 use std::rc::Rc;
 
-type Vars<'a> = Env<'a, VarType>;
+type Vars<'env, F> = Env<'env, VarType<F>>;
 type Types<'a> = Env<'a, Rc<TigerType>>;
 type TResult<T> = Result<T, TranslateError>;
 
@@ -79,42 +81,42 @@ impl fmt::Display for ExpType {
     }
 }
 
-pub fn translate(item: Item) -> TResult<ExpType> {
-    let translator = Translator::new();
+pub fn translate<F: Frame>(item: Item) -> TResult<ExpType> {
+    let translator = Translator::<F>::new();
     translator.translate(item)
 }
 
 #[derive(Debug)]
-struct Translator {
+struct Translator<F: Frame> {
     int: Rc<TigerType>,
     str: Rc<TigerType>,
     nil: Rc<TigerType>,
     unit: Rc<TigerType>,
+    outerlevel: Level<F>,
 }
 
-impl Translator {
+impl<F: Frame> Translator<F> {
     fn new() -> Self {
         Self {
             int: Rc::new(TigerType::Integer),
             str: Rc::new(TigerType::String),
             nil: Rc::new(TigerType::Nil),
             unit: Rc::new(TigerType::Unit),
+            outerlevel: translate::outermost(),
         }
     }
 
     fn translate(self, item: Item) -> TResult<ExpType> {
-        let mut vars: Vars = Env::new();
-        let mut types: Types = Env::new();
-
-        vars.insert(Symbol::intern("nil"), VarType::Var(ty!(self, nil)));
+        let vars = Env::new();
+        let mut types = Env::new();
 
         types.insert(Symbol::intern("int"), ty!(self, int));
         types.insert(Symbol::intern("string"), ty!(self, str));
 
         match item {
-            Item::Exp(e) => self.translate_exp(&vars, &types, &e),
+            Item::Exp(e) => self.translate_exp(&vars, &types, Rc::clone(&self.outerlevel), &e),
             Item::Decs(decs) => {
-                self.translate_decs(&vars, &types, &decs)?;
+                self.translate_decs(&vars, &types, Rc::clone(&self.outerlevel), &decs)?;
                 Ok(ExpType::new(ty!(self, unit), Span::new(0, 1)))
             }
         }

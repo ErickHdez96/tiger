@@ -2,6 +2,7 @@ use clap::{crate_authors, crate_description, crate_version, App, Arg};
 use std::io;
 use std::path::Path;
 use tiger::{
+    frame::X86_64,
     parse, print_compiler_errors,
     terminal::{Color, Style},
     tokenize, translate, SourceFile,
@@ -55,7 +56,7 @@ fn run_main(path: impl AsRef<Path>) -> io::Result<()> {
     }
 
     if let Some(item) = item {
-        match translate(item) {
+        match translate::<X86_64>(item) {
             Ok(e) => println!("{}", e),
             Err(e) => print_compiler_errors(&[e], &source_file),
         }

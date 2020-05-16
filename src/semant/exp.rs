@@ -2,19 +2,27 @@
 use super::{ExpType, TResult, TranslateError, Translator, Types, Vars};
 use crate::ast::{Dec, Exp, Identifier, LValue, Member};
 use crate::env::Env;
+use crate::frame::Frame;
+use crate::translate::{InnerLevel, Level};
 use crate::types::{TigerType, VarType};
 use crate::{terr, ty, Span};
 use std::collections::HashSet;
 use std::rc::Rc;
 
-impl Translator {
-    pub fn translate_exp(&self, vars: &Vars, types: &Types, exp: &Exp) -> TResult<ExpType> {
+impl<F: Frame> Translator<F> {
+    pub fn translate_exp(
+        &self,
+        vars: &Vars<F>,
+        types: &Types,
+        level: Level<F>,
+        exp: &Exp,
+    ) -> TResult<ExpType> {
         match exp {
             Exp::IntegerExp { span, .. } => Ok(ExpType::new(ty!(self, int), *span)),
             Exp::StringExp { span, .. } => Ok(ExpType::new(ty!(self, str), *span)),
             Exp::NilExp { span } => Ok(ExpType::new(ty!(self, nil), *span)),
             Exp::LValue(lvalue) => {
-                let value = self.translate_lvalue_exp(vars, types, lvalue)?;
+                let value = self.translate_lvalue_exp(vars, types, level, lvalue)?;
                 Ok(ExpType::new(value.get_type(), lvalue.span()))
             }
             Exp::Identifier(id) => match vars.get(id.id()) {
@@ -32,8 +40,8 @@ impl Translator {
                 span,
                 op_span,
             } => {
-                let left = self.translate_exp(vars, types, left)?;
-                let right = self.translate_exp(vars, types, right)?;
+                let left = self.translate_exp(vars, types, Rc::clone(&level), left)?;
+                let right = self.translate_exp(vars, types, level, right)?;
                 if left.ty.check_op_operation(&right.ty, *op) {
                     Ok(ExpType::new(ty!(self, int), *span))
                 } else {
@@ -55,25 +63,38 @@ impl Translator {
             } => self.translate_if_exp(
                 vars,
                 types,
+                level,
                 &cond,
                 &then_branch,
                 else_branch.as_ref().map(|x| x.as_ref()),
                 *span,
             ),
             Exp::WhileExp { cond, do_exp, span } => {
-                self.translate_while_exp(vars, types, &cond, &do_exp, *span)
+                self.translate_while_exp(vars, types, level, &cond, &do_exp, *span)
             }
-            Exp::UnaryExp { exp, span } => self.translate_unary_exp(vars, types, &exp, *span),
+            Exp::UnaryExp { exp, span } => {
+                self.translate_unary_exp(vars, types, level, &exp, *span)
+            }
             Exp::ForExp {
                 id,
+                id_escapes,
                 from,
                 to,
                 do_exp,
                 span,
-                ..
-            } => self.translate_for_exp(vars, types, *id, &from, &to, &do_exp, *span),
+            } => self.translate_for_exp(
+                vars,
+                types,
+                level,
+                *id,
+                *id_escapes,
+                &from,
+                &to,
+                &do_exp,
+                *span,
+            ),
             Exp::FnCall { lvalue, args, span } => {
-                self.translate_fn_call(vars, types, lvalue, &args, *span)
+                self.translate_fn_call(vars, types, level, lvalue, &args, *span)
             }
             Exp::NewExp { span, .. } => terr!(
                 "Object extension is not yet built",
@@ -81,32 +102,32 @@ impl Translator {
                 Span::new(span.offset(), 3)
             ),
             Exp::LetExp { decs, exps, span } => {
-                self.translate_let_exp(vars, types, decs, exps, *span)
+                self.translate_let_exp(vars, types, level, decs, exps, *span)
             }
             Exp::NewRecordExp { id, members, span } => {
-                self.translate_new_record(vars, types, id, members, *span)
+                self.translate_new_record(vars, types, level, id, members, *span)
             }
             Exp::NewArrayExp {
                 id,
                 length,
                 init,
                 span,
-            } => self.translate_new_array(vars, types, id, length, init, *span),
+            } => self.translate_new_array(vars, types, level, id, length, init, *span),
             Exp::AssignExp { lvalue, exp, span } => {
-                let exp = self.translate_exp(vars, types, exp)?;
-                match self.translate_lvalue_exp(vars, types, lvalue)? {
-                    VarType::Var(v) if exp.ty.is_assignable_to(v) => {
-                        Ok(ExpType::new(Rc::clone(v), *span))
+                let exp = self.translate_exp(vars, types, Rc::clone(&level), exp)?;
+                match self.translate_lvalue_exp(vars, types, level, lvalue)? {
+                    VarType::Var { ty, .. } if exp.ty.is_assignable_to(ty) => {
+                        Ok(ExpType::new(Rc::clone(ty), *span))
                     }
-                    VarType::Var(v) => terr!(
-                        format!("Expected type `{}`, found `{}`", v, exp.ty),
+                    VarType::Var { ty, .. } => terr!(
+                        format!("Expected type `{}`, found `{}`", ty, exp.ty),
                         *span,
                         exp.span
                     ),
                     _ => terr!("Functions cannot be assigned to", *span, lvalue.span()),
                 }
             }
-            Exp::Exps { exps, .. } => self.translate_exps(vars, types, exps),
+            Exp::Exps { exps, .. } => self.translate_exps(vars, types, level, exps),
             e => {
                 dbg!(e);
                 todo!();
@@ -116,14 +137,15 @@ impl Translator {
 
     fn translate_if_exp(
         &self,
-        vars: &Vars,
+        vars: &Vars<F>,
         types: &Types,
+        level: Level<F>,
         cond: &Exp,
         then_branch: &Exp,
         else_branch: Option<&Exp>,
         span: Span,
     ) -> TResult<ExpType> {
-        let cond = self.translate_exp(vars, types, &cond)?;
+        let cond = self.translate_exp(vars, types, Rc::clone(&level), &cond)?;
         if !cond.ty.is_int() {
             return terr!(
                 format!("Condition of `if` must be `int`, found `{}`", cond.ty),
@@ -132,10 +154,10 @@ impl Translator {
             );
         }
 
-        let then = self.translate_exp(vars, types, &then_branch)?;
+        let then = self.translate_exp(vars, types, Rc::clone(&level), &then_branch)?;
         match else_branch {
             Some(e) => {
-                let e = self.translate_exp(vars, types, &e)?;
+                let e = self.translate_exp(vars, types, level, &e)?;
                 if then.ty == e.ty {
                     Ok(ExpType::new(then.ty, span))
                 } else {
@@ -155,14 +177,15 @@ impl Translator {
 
     fn translate_while_exp(
         &self,
-        vars: &Vars,
+        vars: &Vars<F>,
         types: &Types,
+        level: Level<F>,
         cond: &Exp,
         do_exp: &Exp,
         span: Span,
     ) -> TResult<ExpType> {
-        let cond = self.translate_exp(vars, types, &cond)?;
-        self.translate_exp(vars, types, &do_exp)?;
+        let cond = self.translate_exp(vars, types, Rc::clone(&level), &cond)?;
+        self.translate_exp(vars, types, level, &do_exp)?;
 
         if cond.ty.is_int() {
             Ok(ExpType::new(ty!(self, unit), span))
@@ -177,16 +200,18 @@ impl Translator {
 
     fn translate_for_exp(
         &self,
-        vars: &Vars,
+        vars: &Vars<F>,
         types: &Types,
+        level: Level<F>,
         id: Identifier,
+        id_escapes: bool,
         from: &Exp,
         to: &Exp,
         do_exp: &Exp,
         span: Span,
     ) -> TResult<ExpType> {
-        let from = self.translate_exp(vars, types, &from)?;
-        let to = self.translate_exp(vars, types, &to)?;
+        let from = self.translate_exp(vars, types, Rc::clone(&level), &from)?;
+        let to = self.translate_exp(vars, types, Rc::clone(&level), &to)?;
 
         if !from.ty.is_int() {
             return terr!(
@@ -204,19 +229,26 @@ impl Translator {
         }
 
         let mut vars = Env::with_parent(vars);
-        vars.insert(id.id(), VarType::Var(ty!(self, int)));
-        self.translate_exp(&vars, types, do_exp)?;
+        vars.insert(
+            id.id(),
+            VarType::new_var(
+                ty!(self, int),
+                InnerLevel::allocate_local(Rc::clone(&level), id_escapes),
+            ),
+        );
+        self.translate_exp(&vars, types, level, do_exp)?;
         Ok(ExpType::new(ty!(self, unit), span))
     }
 
     fn translate_unary_exp(
         &self,
-        vars: &Vars,
+        vars: &Vars<F>,
         types: &Types,
+        level: Level<F>,
         exp: &Exp,
         span: Span,
     ) -> TResult<ExpType> {
-        let exp = self.translate_exp(vars, types, &exp)?;
+        let exp = self.translate_exp(vars, types, level, &exp)?;
 
         if exp.ty.is_int() {
             Ok(ExpType::new(ty!(self, int), span))
@@ -229,12 +261,13 @@ impl Translator {
         }
     }
 
-    fn translate_lvalue_exp<'a>(
+    fn translate_lvalue_exp<'b>(
         &self,
-        vars: &'a Vars,
+        vars: &'b Vars<F>,
         types: &Types,
+        level: Level<F>,
         lvalue: &LValue,
-    ) -> TResult<&'a VarType> {
+    ) -> TResult<&'b VarType<F>> {
         match lvalue {
             LValue::Identifier(ident) => match vars.get(ident.id()) {
                 Some(ty) => Ok(ty),
@@ -245,7 +278,7 @@ impl Translator {
                 ),
             },
             LValue::ArrayAccess { lvalue, exp, span } => {
-                let exp = self.translate_exp(vars, types, &exp)?;
+                let exp = self.translate_exp(vars, types, Rc::clone(&level), &exp)?;
                 if !exp.ty.is_int() {
                     return terr!(
                         format!("Expected `int`, found `{}`", exp.ty),
@@ -254,7 +287,7 @@ impl Translator {
                     );
                 }
 
-                self.translate_lvalue_exp(vars, types, &lvalue)
+                self.translate_lvalue_exp(vars, types, level, &lvalue)
             }
             LValue::MemberAccess { .. } => todo!("Classes are not yet supported"),
         }
@@ -262,28 +295,29 @@ impl Translator {
 
     fn translate_fn_call(
         &self,
-        vars: &Vars,
+        vars: &Vars<F>,
         types: &Types,
+        level: Level<F>,
         lvalue: &LValue,
         args: &[Exp],
         span: Span,
     ) -> TResult<ExpType> {
         let var_name = lvalue.to_string();
         let var_span = lvalue.span();
-        let func = self.translate_lvalue_exp(vars, types, &lvalue)?;
+        let func = self.translate_lvalue_exp(vars, types, Rc::clone(&level), &lvalue)?;
         let (params, ret_type) = match func {
-            VarType::Var(v) => {
+            VarType::Var { ty, .. } => {
                 return terr!(
-                    format!("Variable {} of type `{}` is not callable", var_name, v),
+                    format!("Variable {} of type `{}` is not callable", var_name, ty),
                     span,
                     var_span
                 )
             }
-            VarType::Fn(params, ty) => (params, ty),
+            VarType::Fn { formals, ty, .. } => (formals, ty),
         };
 
         for (param, arg) in params.iter().zip(args.iter()) {
-            let arg = self.translate_exp(vars, types, arg)?;
+            let arg = self.translate_exp(vars, types, Rc::clone(&level), arg)?;
             if !arg.ty.is_assignable_to(param) {
                 return terr!(
                     format!("Expected type `{}`, found `{}`", param, arg.ty),
@@ -297,21 +331,28 @@ impl Translator {
 
     fn translate_let_exp(
         &self,
-        vars: &Vars,
+        vars: &Vars<F>,
         types: &Types,
+        level: Level<F>,
         decs: &[Dec],
         exps: &[Exp],
         _span: Span,
     ) -> TResult<ExpType> {
-        let (vars, types) = self.translate_decs(vars, types, decs)?;
-        self.translate_exps(&vars, &types, exps)
+        let (vars, types) = self.translate_decs(vars, types, Rc::clone(&level), decs)?;
+        self.translate_exps(&vars, &types, level, exps)
     }
 
-    fn translate_exps(&self, vars: &Vars, types: &Types, exps: &[Exp]) -> TResult<ExpType> {
+    fn translate_exps(
+        &self,
+        vars: &Vars<F>,
+        types: &Types,
+        level: Level<F>,
+        exps: &[Exp],
+    ) -> TResult<ExpType> {
         let mut last_exp = ExpType::new(ty!(self, unit), Span::new(0, 1));
 
         for exp in exps {
-            last_exp = self.translate_exp(vars, types, exp)?;
+            last_exp = self.translate_exp(vars, types, Rc::clone(&level), exp)?;
         }
 
         Ok(last_exp)
@@ -319,8 +360,9 @@ impl Translator {
 
     fn translate_new_record(
         &self,
-        vars: &Vars,
+        vars: &Vars<F>,
         types: &Types,
+        level: Level<F>,
         id: &Identifier,
         members: &[Member],
         span: Span,
@@ -340,7 +382,7 @@ impl Translator {
                     if used.contains(&member.id.id()) {
                         return terr!("Member duplicated", span, member.id.span());
                     }
-                    let exp = self.translate_exp(vars, types, &member.exp)?;
+                    let exp = self.translate_exp(vars, types, Rc::clone(&level), &member.exp)?;
 
                     match expected_members.iter().find(|m| m.name() == member.id.id()) {
                         Some(expected_member) if exp.ty.is_assignable_to(expected_member.ty()) => {
@@ -398,15 +440,16 @@ impl Translator {
 
     fn translate_new_array(
         &self,
-        vars: &Vars,
+        vars: &Vars<F>,
         types: &Types,
+        level: Level<F>,
         id: &Identifier,
         length: &Exp,
         init: &Exp,
         span: Span,
     ) -> TResult<ExpType> {
         let ty = ty!(types, id.id(), span, id.span())?;
-        let length = self.translate_exp(vars, types, length)?;
+        let length = self.translate_exp(vars, types, Rc::clone(&level), length)?;
         if !length.ty.is_int() {
             return terr!(
                 format!("Expected `int`, found `{}`", length.ty),
@@ -414,7 +457,7 @@ impl Translator {
                 length.span
             );
         }
-        let init = self.translate_exp(vars, types, init)?;
+        let init = self.translate_exp(vars, types, level, init)?;
 
         match &**ty {
             TigerType::Array(ty) if init.ty.is_assignable_to(ty) => {
@@ -438,6 +481,7 @@ impl Translator {
 mod tests {
     use super::*;
     use crate::ast::BinOp;
+    use crate::frame::X86_64;
     use crate::types::TigerType;
     use crate::{translate, Item, Span, Symbol, IK};
 
@@ -447,10 +491,14 @@ mod tests {
         };
     }
 
+    fn t(item: Item) -> TResult<ExpType> {
+        translate::<X86_64>(item)
+    }
+
     #[test]
     fn test_simple_exp_translations() {
-        let expty = translate(item![IK![int, Symbol::intern("3"), 0, 1]])
-            .expect("Could not translate expression");
+        let expty =
+            t(item![IK![int, Symbol::intern("3"), 0, 1]]).expect("Could not translate expression");
 
         assert_eq!(
             expty,
@@ -461,7 +509,7 @@ mod tests {
             }
         );
 
-        let expty = translate(item![IK![str, Symbol::intern("Hello"), 0, 7]])
+        let expty = t(item![IK![str, Symbol::intern("Hello"), 0, 7]])
             .expect("Could not translate expression");
 
         assert_eq!(
@@ -473,7 +521,7 @@ mod tests {
             }
         );
 
-        let expty = translate(item!(IK![nil, 0])).expect("Could not translate expression");
+        let expty = t(item!(IK![nil, 0])).expect("Could not translate expression");
 
         assert_eq!(
             expty,
@@ -489,8 +537,7 @@ mod tests {
     fn test_arithmetic_expression() {
         let l = IK![int, Symbol::intern("1"), 0, 1];
         let r = IK![int, Symbol::intern("2"), 4, 1];
-        let expty =
-            translate(item!(IK![+, l, r, 0, 5, 2])).expect("Could not translate expression");
+        let expty = t(item!(IK![+, l, r, 0, 5, 2])).expect("Could not translate expression");
 
         assert_eq!(
             expty,
@@ -506,8 +553,7 @@ mod tests {
     fn test_invalid_expressions() {
         let l = IK![int, Symbol::intern("1"), 0, 1];
         let r = IK![str, Symbol::intern("Hi"), 4, 4];
-        let expty =
-            translate(item!(IK![+, l, r, 0, 8, 2])).expect_err("Could not translate expression");
+        let expty = t(item!(IK![+, l, r, 0, 8, 2])).expect_err("Could not translate expression");
 
         assert_eq!(
             expty.msg,
@@ -516,8 +562,7 @@ mod tests {
 
         let l = IK![str, Symbol::intern("Hi"), 0, 1];
         let r = IK![int, Symbol::intern("1"), 0, 1];
-        let expty =
-            translate(item!(IK![-, l, r, 0, 1, 2])).expect_err("Could not translate expression");
+        let expty = t(item!(IK![-, l, r, 0, 1, 2])).expect_err("Could not translate expression");
 
         assert_eq!(
             expty.msg,
@@ -526,8 +571,7 @@ mod tests {
 
         let l = IK![str, Symbol::intern("Hi"), 0, 1];
         let r = IK![nil, 1];
-        let expty =
-            translate(item!(IK![*, l, r, 0, 1, 2])).expect_err("Could not translate expression");
+        let expty = t(item!(IK![*, l, r, 0, 1, 2])).expect_err("Could not translate expression");
 
         assert_eq!(
             expty.msg,
@@ -536,8 +580,8 @@ mod tests {
 
         let l = IK![int, Symbol::intern("3"), 0, 1];
         let r = IK![nil, 1];
-        let expty = translate(item!(IK![BinOp::Eq, l, r, 0, 1, 2]))
-            .expect_err("Could not translate expression");
+        let expty =
+            t(item!(IK![BinOp::Eq, l, r, 0, 1, 2])).expect_err("Could not translate expression");
 
         assert_eq!(
             expty.msg,
