@@ -96,13 +96,6 @@ fn traverse_exp<'a, 'b>(env: &EscapeEnv<'a, 'b>, depth: usize, exp: &'b mut Exp)
         }
         Exp::UnaryExp { ref mut exp, .. } => traverse_exp(&env, depth, exp),
         Exp::LValue(lvalue) => traverse_lvalue(env, depth, lvalue),
-        Exp::Identifier(id) => {
-            if let Some((d, escapes)) = env.get(id.id()) {
-                if depth > *d {
-                    **escapes.borrow_mut() = true;
-                }
-            }
-        }
         _ => {}
     }
 }

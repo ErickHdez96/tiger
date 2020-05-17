@@ -7,6 +7,7 @@ mod env;
 pub mod error_reporter;
 pub mod escapes;
 pub mod frame;
+pub mod ir;
 pub mod lexer;
 pub mod parser;
 pub mod semant;
@@ -16,7 +17,7 @@ pub mod symbol;
 mod temp;
 pub mod terminal;
 pub mod token;
-mod translate;
+pub mod translate;
 mod types;
 
 pub use ast::Item;

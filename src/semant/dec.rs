@@ -1,38 +1,42 @@
-use super::{TResult, TranslateError, Translator, Types, Vars};
+use super::{Semant, TResult, TranslateError, Types, Vars};
 use crate::ast::{Dec, TypeDec, VarDec};
 use crate::env::Env;
 use crate::frame::Frame;
 use crate::temp::Label;
-use crate::translate::{InnerLevel, Level};
+use crate::translate::{translators as tr, ExpKind, Level};
 use crate::types::VarType;
 use crate::{terr, ty, Span};
 use std::rc::Rc;
 
-impl<F: Frame> Translator<F> {
+impl<F: Frame + PartialEq> Semant<F> {
     pub fn translate_decs<'env>(
-        &self,
+        &mut self,
         vars: &'env Vars<F>,
         types: &'env Types,
-        level: Level<F>,
+        level: &Rc<Level<F>>,
         decs: &[Dec],
-    ) -> TResult<(Vars<'env, F>, Types<'env>)> {
+    ) -> TResult<(Vars<'env, F>, Types<'env>, ExpKind)> {
         let mut vars = Env::with_parent(vars);
         let mut types = Env::with_parent(types);
+        let mut stmts = vec![];
 
         for dec in decs {
-            self.translate_dec(&mut vars, &mut types, Rc::clone(&level), dec)?;
+            let dec = self.translate_dec(&mut vars, &mut types, &level, dec)?;
+            if let Some(dec) = dec {
+                stmts.push(dec);
+            }
         }
 
-        Ok((vars, types))
+        Ok((vars, types, tr::decs(stmts)))
     }
 
     fn translate_dec<'env>(
-        &self,
+        &mut self,
         vars: &'env mut Vars<F>,
         types: &mut Types,
-        level: Level<F>,
+        level: &Rc<Level<F>>,
         dec: &Dec,
-    ) -> TResult<()> {
+    ) -> TResult<Option<ExpKind>> {
         match dec {
             Dec::VarDec(var_dec) => self.translate_var_dec(vars, types, level, var_dec),
             Dec::Class { span, .. } => terr!(
@@ -40,18 +44,18 @@ impl<F: Frame> Translator<F> {
                 *span,
                 Span::new(span.offset(), 5)
             ),
-            Dec::TypeDec(type_dec) => self.translate_type_dec(types, type_dec),
+            Dec::TypeDec(type_dec) => self.translate_type_dec(types, type_dec).and(Ok(None)),
             _ => todo!("{}", dec),
         }
     }
 
     fn translate_var_dec<'env>(
-        &self,
+        &mut self,
         vars: &'env mut Vars<F>,
         types: &mut Types,
-        level: Level<F>,
+        level: &Rc<Level<F>>,
         var_dec: &VarDec,
-    ) -> TResult<()> {
+    ) -> TResult<Option<ExpKind>> {
         match var_dec {
             VarDec::Var {
                 id,
@@ -60,7 +64,7 @@ impl<F: Frame> Translator<F> {
                 span,
                 escapes,
             } => {
-                let exp = self.translate_exp(vars, types, Rc::clone(&level), exp)?;
+                let exp = self.translate_exp(vars, types, &level, exp)?;
                 let ty = match opt_type {
                     Some(expected_ty) => match types.get(expected_ty.id()) {
                         Some(ty) if !exp.ty.is_assignable_to(ty) => terr!(
@@ -86,11 +90,10 @@ impl<F: Frame> Translator<F> {
                     ),
                     None => Ok(&exp.ty),
                 }?;
-                vars.insert(
-                    id.id(),
-                    VarType::new_var(Rc::clone(ty), InnerLevel::allocate_local(level, *escapes)),
-                );
-                Ok(())
+                let access = level.allocate_local(*escapes);
+                let var = tr::init_var::<F>(&access, &level, exp.exp);
+                vars.insert(id.id(), VarType::new_var(Rc::clone(ty), access));
+                Ok(Some(var))
             }
             VarDec::Fn {
                 id,
@@ -135,23 +138,18 @@ impl<F: Frame> Translator<F> {
                 };
                 vars.insert(
                     id.id(),
-                    VarType::new_fn(formals, ret_type, Rc::clone(&level)),
+                    VarType::new_fn(formals, ret_type, &level, Label::new()),
                 );
-                let level = InnerLevel::new(Rc::clone(&level), Label::new(), &formal_escapes);
+                let level = Level::new(&level, Label::new(), &formal_escapes);
                 let mut body_vars = Env::with_parent(vars);
 
                 for (id, escapes, ty) in new_vars {
-                    body_vars.insert(
-                        id,
-                        VarType::new_var(
-                            ty,
-                            InnerLevel::allocate_local(Rc::clone(&level), escapes),
-                        ),
-                    );
+                    body_vars.insert(id, VarType::new_var(ty, level.allocate_local(escapes)));
                 }
 
-                self.translate_exp(&body_vars, types, level, body)?;
-                Ok(())
+                let body = self.translate_exp(&body_vars, types, &level, body)?;
+                self.gen.proc_entry_exit(&level, body.exp);
+                Ok(None)
             }
             VarDec::Primitive {
                 id,
@@ -188,14 +186,17 @@ impl<F: Frame> Translator<F> {
                     None => ty!(self, unit),
                 };
 
-                vars.insert(id.id(), VarType::new_fn(formals, ret_type, level));
+                vars.insert(
+                    id.id(),
+                    VarType::new_fn(formals, ret_type, level, Label::with_name(id.id())),
+                );
 
-                Ok(())
+                Ok(None)
             }
         }
     }
 
-    fn translate_type_dec(&self, types: &mut Types, type_dec: &TypeDec) -> TResult<()> {
+    fn translate_type_dec(&mut self, types: &mut Types, type_dec: &TypeDec) -> TResult<()> {
         let ty = self.translate_type(types, type_dec)?;
 
         match type_dec {

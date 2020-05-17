@@ -1,5 +1,6 @@
 use crate::ast::BinOp;
 use crate::frame::Frame;
+use crate::temp::Label;
 use crate::translate::{Access, Level};
 use crate::Symbol;
 use std::cmp::{Eq, PartialEq};
@@ -164,9 +165,17 @@ pub enum VarType<F: Frame> {
     Fn {
         formals: Vec<Rc<TigerType>>,
         ty: Rc<TigerType>,
-        level: Level<F>,
+        level: Rc<Level<F>>,
+        label: Label,
     },
 }
+
+pub type VarFnDestructured<'a, F> = (
+    &'a [Rc<TigerType>],
+    &'a Rc<TigerType>,
+    &'a Rc<Level<F>>,
+    Label,
+);
 
 impl<F: Frame> VarType<F> {
     /// Create a new variable declaration with the given type and access.
@@ -174,14 +183,17 @@ impl<F: Frame> VarType<F> {
         Self::Var { ty, access }
     }
 
-    pub fn new_fn(formals: Vec<Rc<TigerType>>, ty: Rc<TigerType>, level: Level<F>) -> Self {
-        Self::Fn { formals, ty, level }
-    }
-
-    pub fn get_type(&self) -> Rc<TigerType> {
-        match self {
-            VarType::Var { ty, .. } => Rc::clone(ty),
-            VarType::Fn { ty, .. } => Rc::clone(ty),
+    pub fn new_fn(
+        formals: Vec<Rc<TigerType>>,
+        ty: Rc<TigerType>,
+        level: &Rc<Level<F>>,
+        label: Label,
+    ) -> Self {
+        Self::Fn {
+            formals,
+            ty,
+            level: Rc::clone(level),
+            label,
         }
     }
 }

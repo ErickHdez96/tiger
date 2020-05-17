@@ -1,11 +1,11 @@
-use super::{TResult, TranslateError, Translator, Types};
+use super::{Semant, TResult, TranslateError, Types};
 use crate::ast::TypeDec;
 use crate::frame::Frame;
 use crate::types::{RecordMember, TigerType};
 use crate::{terr, Span};
 use std::rc::Rc;
 
-impl<F: Frame> Translator<F> {
+impl<F: Frame + PartialEq> Semant<F> {
     pub fn translate_type<'env>(
         &self,
         types: &'env Types,
@@ -21,6 +21,7 @@ impl<F: Frame> Translator<F> {
                 ),
             },
             TypeDec::Record { fields, span, .. } => {
+                // TODO: Allow recursive records
                 let mut members = vec![];
 
                 for field in fields {

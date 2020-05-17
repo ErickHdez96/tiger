@@ -1,6 +1,7 @@
 use crate::Symbol;
 use std::cell::Cell;
 use std::default::Default;
+use std::fmt;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Temp(u32);
@@ -15,6 +16,12 @@ impl Temp {
 impl Default for Temp {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl fmt::Display for Temp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
     }
 }
 
@@ -42,7 +49,7 @@ impl Label {
     /// If it is an anonymous label (i.e. it was created with Label::new()).
     pub fn to_str(&self) -> &'static str {
         match self {
-            Label::Num(_) => panic!("Anonymous label does not have a name"),
+            Label::Num(_) => panic!("Cannot convert an anonymous label to &str"),
             Label::Named(s) => s.as_str(),
         }
     }
@@ -51,6 +58,15 @@ impl Label {
 impl Default for Label {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl fmt::Display for Label {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Label::Num(n) => write!(f, "L{}", n),
+            Label::Named(s) => s.as_str().fmt(f),
+        }
     }
 }
 

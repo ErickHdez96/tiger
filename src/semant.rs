@@ -5,9 +5,11 @@ mod ty;
 use crate::env::Env;
 use crate::error_reporter::CompilerError;
 use crate::frame::Frame;
-use crate::translate::{self, Level};
+use crate::ir::{Exp, Stmt};
+use crate::temp::Label;
+use crate::translate::{self, ExpKind, Gen, Level};
 use crate::types::{TigerType, VarType};
-use crate::{Item, Span, Symbol};
+use crate::{exp, stmt, Item, Span, Symbol};
 use std::fmt;
 use std::rc::Rc;
 
@@ -17,7 +19,7 @@ type TResult<T> = Result<T, TranslateError>;
 
 #[macro_export]
 macro_rules! terr {
-    ($msg:expr, $snippet_span:expr, $error_span:expr) => {
+    ($msg:expr, $snippet_span:expr, $error_span:expr $(,)?) => {
         Err(TranslateError::new($msg, $snippet_span, $error_span))
     };
 }
@@ -62,51 +64,60 @@ macro_rules! ty {
     };
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub struct ExpType {
-    pub exp: (),
+    pub exp: ExpKind,
     pub ty: Rc<TigerType>,
     pub span: Span,
 }
 
 impl ExpType {
-    fn new(ty: Rc<TigerType>, span: Span) -> Self {
-        Self { exp: (), ty, span }
+    fn new(exp: ExpKind, ty: Rc<TigerType>, span: Span) -> Self {
+        Self { exp, ty, span }
     }
 }
 
 impl fmt::Display for ExpType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.ty.fmt(f)
+        self.exp.fmt(f)
     }
 }
 
-pub fn translate<F: Frame>(item: Item) -> TResult<ExpType> {
-    let translator = Translator::<F>::new();
+pub fn translate<F: Frame + PartialEq>(item: Item) -> TResult<ExpType> {
+    let translator = Semant::<F>::new();
     translator.translate(item)
 }
 
 #[derive(Debug)]
-struct Translator<F: Frame> {
+struct Semant<F: Frame + PartialEq> {
     int: Rc<TigerType>,
     str: Rc<TigerType>,
     nil: Rc<TigerType>,
     unit: Rc<TigerType>,
-    outerlevel: Level<F>,
+    outerlevel: Rc<Level<F>>,
+
+    gen: Gen<F>,
+
+    /// A stack of labels pointing to the end of a loop expr. When reaching a break exression, it
+    /// applies to the last label in the stack, if there is none, it means the break is ouside of a
+    /// loop.
+    loop_labels: Vec<Label>,
 }
 
-impl<F: Frame> Translator<F> {
+impl<F: Frame + PartialEq> Semant<F> {
     fn new() -> Self {
         Self {
             int: Rc::new(TigerType::Integer),
             str: Rc::new(TigerType::String),
             nil: Rc::new(TigerType::Nil),
             unit: Rc::new(TigerType::Unit),
-            outerlevel: translate::outermost(),
+            outerlevel: translate::outermost::<F>(),
+            gen: Gen::new(),
+            loop_labels: vec![],
         }
     }
 
-    fn translate(self, item: Item) -> TResult<ExpType> {
+    fn translate(mut self, item: Item) -> TResult<ExpType> {
         let vars = Env::new();
         let mut types = Env::new();
 
@@ -114,10 +125,14 @@ impl<F: Frame> Translator<F> {
         types.insert(Symbol::intern("string"), ty!(self, str));
 
         match item {
-            Item::Exp(e) => self.translate_exp(&vars, &types, Rc::clone(&self.outerlevel), &e),
+            Item::Exp(e) => self.translate_exp(&vars, &types, &Rc::clone(&self.outerlevel), &e),
             Item::Decs(decs) => {
-                self.translate_decs(&vars, &types, Rc::clone(&self.outerlevel), &decs)?;
-                Ok(ExpType::new(ty!(self, unit), Span::new(0, 1)))
+                self.translate_decs(&vars, &types, &Rc::clone(&self.outerlevel), &decs)?;
+                Ok(ExpType::new(
+                    ExpKind::Nx(stmt!(exp exp!(const 0))),
+                    ty!(self, unit),
+                    Span::new(0, 1),
+                ))
             }
         }
     }

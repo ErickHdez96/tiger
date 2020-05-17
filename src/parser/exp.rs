@@ -1,4 +1,4 @@
-use super::{AstPos, Parser};
+use super::{AstPos, Parser, ParserError};
 use crate::ast::{BinOp, Exp, Identifier, LValue, Member};
 use crate::{Span, TokenKind, IK, T};
 
@@ -55,7 +55,17 @@ impl Parser {
             // integer
             TokenKind::Number(s) => {
                 let span = self.advance().span();
-                Some(IK![int, s, span.offset(), span.len()])
+                match s.as_str().parse::<usize>() {
+                    Ok(n) => Some(IK![int, n, span.offset(), span.len()]),
+                    Err(_) => {
+                        self.errors.push(ParserError::new(
+                            format!("Cannot fit into {} bytes", std::mem::size_of::<usize>()),
+                            span,
+                            span,
+                        ));
+                        None
+                    }
+                }
             }
             // string
             TokenKind::Literal(s) => {
@@ -385,7 +395,7 @@ mod tests {
 
         let input = "3";
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
-        assert_eq!(item, item!(IK!(int, Symbol::intern("3"), 0, 1)));
+        assert_eq!(item, item!(IK!(int, 3, 0, 1)));
 
         let input = r#""Hello, world!""#;
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
@@ -410,7 +420,7 @@ mod tests {
         let input = "if 1 then ident";
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
 
-        let cond = IK![int, Symbol::intern("1"), 3, 1];
+        let cond = IK![int, 1, 3, 1];
         let then = IK![
             explvalue,
             IK![lvalue, IK![ident, Symbol::intern("ident"), 10, 5]]
@@ -421,7 +431,7 @@ mod tests {
         let input = r#"if 1 then ident else "Hello""#;
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
 
-        let cond = IK![int, Symbol::intern("1"), 3, 1];
+        let cond = IK![int, 1, 3, 1];
         let then = IK![
             explvalue,
             IK![lvalue, IK![ident, Symbol::intern("ident"), 10, 5]]
@@ -439,8 +449,8 @@ mod tests {
         let input = r#"while 1 do 3"#;
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
 
-        let cond = IK![int, Symbol::intern("1"), 6, 1];
-        let do_exp = IK![int, Symbol::intern("3"), 11, 1];
+        let cond = IK![int, 1, 6, 1];
+        let do_exp = IK![int, 3, 11, 1];
 
         assert_eq!(item, item!(IK!(while, cond, do_exp, 0, input.len())),);
     }
@@ -451,8 +461,8 @@ mod tests {
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
 
         let id = IK![ident, Symbol::intern("i"), 4, 1];
-        let from = IK![int, Symbol::intern("0"), 9, 1];
-        let to = IK![int, Symbol::intern("10"), 14, 2];
+        let from = IK![int, 0, 9, 1];
+        let to = IK![int, 10, 14, 2];
         let do_exp = IK![str, Symbol::intern("Hello"), 20, 7];
 
         assert_eq!(item, item!(IK!(for, id, from, to, do_exp, 0, input.len())),);
@@ -473,32 +483,32 @@ mod tests {
         let input = "3 + 3";
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
 
-        let left = IK![int, Symbol::intern("3"), 0, 1];
-        let right = IK![int, Symbol::intern("3"), 4, 1];
+        let left = IK![int, 3, 0, 1];
+        let right = IK![int, 3, 4, 1];
 
         assert_eq!(item, item!(IK![+, left, right, 0, input.len(), 2]));
 
         let input = "3 - 3";
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
 
-        let left = IK![int, Symbol::intern("3"), 0, 1];
-        let right = IK![int, Symbol::intern("3"), 4, 1];
+        let left = IK![int, 3, 0, 1];
+        let right = IK![int, 3, 4, 1];
 
         assert_eq!(item, item!(IK![-, left, right, 0, input.len(), 2]));
 
         let input = "3 * 3";
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
 
-        let left = IK![int, Symbol::intern("3"), 0, 1];
-        let right = IK![int, Symbol::intern("3"), 4, 1];
+        let left = IK![int, 3, 0, 1];
+        let right = IK![int, 3, 4, 1];
 
         assert_eq!(item, item!(IK![*, left, right, 0, input.len(), 2]));
 
         let input = "3 / 3";
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
 
-        let left = IK![int, Symbol::intern("3"), 0, 1];
-        let right = IK![int, Symbol::intern("3"), 4, 1];
+        let left = IK![int, 3, 0, 1];
+        let right = IK![int, 3, 4, 1];
 
         assert_eq!(item, item!(IK![/, left, right, 0, input.len(), 2]));
     }
@@ -508,9 +518,9 @@ mod tests {
         let input = "1 + 2 * 3";
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
 
-        let left = IK![int, Symbol::intern("1"), 0, 1];
-        let mid = IK![int, Symbol::intern("2"), 4, 1];
-        let right = IK![int, Symbol::intern("3"), 8, 1];
+        let left = IK![int, 1, 0, 1];
+        let mid = IK![int, 2, 4, 1];
+        let right = IK![int, 3, 8, 1];
 
         assert_eq!(
             item,
@@ -520,9 +530,9 @@ mod tests {
         let input = "1 - 2 - 3";
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
 
-        let left = IK![int, Symbol::intern("1"), 0, 1];
-        let mid = IK![int, Symbol::intern("2"), 4, 1];
-        let right = IK![int, Symbol::intern("3"), 8, 1];
+        let left = IK![int, 1, 0, 1];
+        let mid = IK![int, 2, 4, 1];
+        let right = IK![int, 3, 8, 1];
 
         assert_eq!(
             item,
@@ -535,15 +545,15 @@ mod tests {
         let input = "-1 + 2";
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
 
-        let left = IK![-, IK![int, Symbol::intern("1"), 1, 1], 0, 2];
-        let right = IK![int, Symbol::intern("2"), 5, 1];
+        let left = IK![-, IK![int, 1, 1, 1], 0, 2];
+        let right = IK![int, 2, 5, 1];
 
         assert_eq!(item, item!(IK![+, left, right, 0, input.len(), 3]));
 
         let input = "---1";
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
 
-        let n1 = IK![int, Symbol::intern("1"), 3, 1];
+        let n1 = IK![int, 1, 3, 1];
         let inner = IK![-, n1, 2, 2];
         let mid = IK![-, inner, 1, 3];
         let outer = IK![-, mid, 0, input.len()];
@@ -553,8 +563,8 @@ mod tests {
         let input = "1 * -2";
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
 
-        let n1 = IK![int, Symbol::intern("1"), 0, 1];
-        let n2 = IK![int, Symbol::intern("2"), 5, 1];
+        let n1 = IK![int, 1, 0, 1];
+        let n2 = IK![int, 2, 5, 1];
         let right = IK![-, n2, 4, 2];
 
         assert_eq!(item, item!(IK![*, n1, right, 0, input.len(), 2]));
@@ -565,9 +575,9 @@ mod tests {
         let input = "1 * -( 2 - 3 )";
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
 
-        let n1 = IK![int, Symbol::intern("1"), 0, 1];
-        let n2 = IK![int, Symbol::intern("2"), 7, 1];
-        let n3 = IK![int, Symbol::intern("3"), 11, 1];
+        let n1 = IK![int, 1, 0, 1];
+        let n2 = IK![int, 2, 7, 1];
+        let n3 = IK![int, 3, 11, 1];
         let paren = IK![-, n2, n3, 5, 9, 9];
         let minus_paren = IK![-, paren, 4, 10];
 
@@ -594,8 +604,8 @@ mod tests {
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
 
         let chess = IK![ident, Symbol::intern("chess"), 0, 5];
-        let n0 = IK![int, Symbol::intern("0"), 6, 1];
-        let n7 = IK![int, Symbol::intern("7"), 9, 1];
+        let n0 = IK![int, 0, 6, 1];
+        let n7 = IK![int, 7, 9, 1];
         let first_access = IK![array, IK![lvalue, chess], n0, 0, 8];
         let last_access = IK![array, first_access, n7, 0, input.len()];
 
@@ -610,9 +620,9 @@ mod tests {
         let game = IK![lvalue, IK![ident, Symbol::intern("game"), 0, 4]];
         let board = IK![ident, Symbol::intern("board"), 5, 5];
         let game_board = IK![member, game, board, 0, 10];
-        let n0 = IK![int, Symbol::intern("0"), 11, 1];
+        let n0 = IK![int, 0, 11, 1];
         let game_board_0 = IK![array, game_board, n0, 0, 13];
-        let n7 = IK![int, Symbol::intern("7"), 14, 1];
+        let n7 = IK![int, 7, 14, 1];
         let game_board_0_7 = IK![array, game_board_0, n7, 0, 16];
         let king = IK![str, Symbol::intern("King"), 20, 6];
         let assign = IK![assign, game_board_0_7, king, 0, input.len()];
@@ -674,8 +684,8 @@ mod tests {
         let item = parse(tokenize(input).0).0.expect("Couldn't parse input");
 
         let id = IK![ident, Symbol::intern("int_array"), 0, 9];
-        let n10 = IK![int, Symbol::intern("10"), 11, 2];
-        let n0 = IK![int, Symbol::intern("0"), 18, 1];
+        let n10 = IK![int, 10, 11, 2];
+        let n0 = IK![int, 0, 18, 1];
 
         assert_eq!(item, item!(IK![newarray, id, n10, n0, 0, input.len()]));
     }

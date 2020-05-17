@@ -344,7 +344,6 @@ pub enum Exp {
     },
 
     LValue(Box<LValue>),
-    Identifier(Identifier),
     AssignExp {
         lvalue: Box<LValue>,
         exp: Box<Exp>,
@@ -373,7 +372,7 @@ pub enum Exp {
     }, // -exp
 
     IntegerExp {
-        value: Symbol,
+        value: usize,
         span: Span,
     },
     StringExp {
@@ -411,7 +410,6 @@ impl Exp {
             | BreakExp { span, .. }
             | NilExp { span, .. } => *span,
             LValue(lvalue) => lvalue.span(),
-            Identifier(ident) => ident.span(),
         }
     }
 
@@ -438,7 +436,6 @@ impl Exp {
                 *span = new_span;
             }
             LValue(lvalue) => lvalue.set_span(new_span),
-            Identifier(ident) => ident.set_span(new_span),
         }
     }
 }
@@ -463,9 +460,8 @@ impl fmt::Display for Exp {
             Exp::BinExp {
                 op, left, right, ..
             } => write!(f, "({} {} {})", left, op, right),
-            Exp::IntegerExp { value, .. } => write!(f, "{}", value.as_str()),
+            Exp::IntegerExp { value, .. } => write!(f, "{}", value),
             Exp::LValue(lvalue) => lvalue.fmt(f),
-            Exp::Identifier(id) => id.fmt(f),
             Exp::StringExp { value, .. } => write!(f, r#""{}""#, value.as_str()),
             Exp::Exps { exps, .. } => {
                 for (i, exp) in exps.iter().enumerate() {
@@ -799,9 +795,9 @@ macro_rules! IK {
             span: Span::new($offset as u32, 5),
         }
     };
-    (int, $symbol:expr, $offset:expr, $length:expr) => {
+    (int, $int:expr, $offset:expr, $length:expr) => {
         Exp::IntegerExp {
-            value: $symbol,
+            value: $int,
             span: Span::new($offset as u32, $length as u32),
         }
     };
@@ -813,9 +809,6 @@ macro_rules! IK {
     };
     (ident, $symbol:expr, $offset:expr, $length:expr) => {
         Identifier::new($symbol, Span::new($offset as u32, $length as u32))
-    };
-    (identexp, $symbol:expr, $offset:expr, $length:expr) => {
-        Exp::Identifier(IK![ident, $symbol, $offset, $length])
     };
     (let, $decs:expr, $exps:expr, $offset:expr, $length:expr) => {
         Exp::LetExp {

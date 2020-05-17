@@ -404,7 +404,7 @@ mod tests {
 
         let pi = IK![ident, Symbol::intern("pi"), 4, 2];
         let int = IK![ident, Symbol::intern("int"), 8, 3];
-        let n3 = IK![int, Symbol::intern("3"), 15, 1];
+        let n3 = IK![int, 3, 15, 1];
 
         assert_eq!(
             item,
