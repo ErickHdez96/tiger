@@ -124,9 +124,9 @@ pub fn fn_call<F: Frame + PartialEq>(
     }
 
     let mut new_args = Vec::with_capacity(args.len() + 1);
-    new_args.push(*link);
+    new_args.push(link);
     for arg in args {
-        new_args.push(*un_ex(arg));
+        new_args.push(un_ex(arg));
     }
     ExpKind::Ex(exp!(call exp!(name label), new_args))
 }

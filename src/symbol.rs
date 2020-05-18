@@ -4,11 +4,12 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt;
 use std::mem;
 
 /// A Symbol is a representation of an interned [`String`]. They allow faster string comparison, as
 /// it is only required to compare two [`u32`]s.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Symbol(u32);
 
 impl Symbol {
@@ -44,6 +45,12 @@ impl Symbol {
         // terminates. This means that the strings inside it can be expected to have a static
         // lifetime.
         with_interner(|interner| unsafe { mem::transmute::<&str, &str>(interner.lookup(self)) })
+    }
+}
+
+impl fmt::Debug for Symbol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_str().fmt(f)
     }
 }
 

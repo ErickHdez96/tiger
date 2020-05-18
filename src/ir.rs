@@ -1,3 +1,4 @@
+#![allow(clippy::vec_box)]
 use crate::ast;
 use crate::temp::{Label, Temp};
 use std::fmt;
@@ -26,7 +27,7 @@ pub enum Exp {
     /// Procedure call: the application of function `func` to argument list `args`.
     /// The subexpression `func` is evaluated before the arguments, which are evaluated from left
     /// to right.
-    Call { func: Box<Exp>, args: Vec<Exp> },
+    Call { func: Box<Exp>, args: Vec<Box<Exp>> },
 
     /// The statement `s` is evaluated for side effects, then `e` is evaluated for a result.
     Eseq(Box<Stmt>, Box<Exp>),
@@ -94,6 +95,16 @@ pub enum Stmt {
     /// a label definition in assembly language. The value Name(n) may be the target of jumps,
     /// calls, etc.
     Label(Label),
+}
+
+impl Stmt {
+    /// Check whether the current statement is a label.
+    pub fn is_label(&self) -> bool {
+        match self {
+            Stmt::Label(_) => true,
+            _ => false,
+        }
+    }
 }
 
 impl fmt::Display for Stmt {
@@ -229,6 +240,23 @@ impl RelOp {
             _ => None,
         }
     }
+
+    pub fn inverse(self: RelOp) -> RelOp {
+        use RelOp::*;
+
+        match self {
+            Eq => Neq,
+            Neq => Eq,
+            Lt => Gte,
+            Gt => Lte,
+            Lte => Gt,
+            Gte => Lt,
+            ULt => UGte,
+            UGt => ULte,
+            ULte => UGt,
+            UGte => ULt,
+        }
+    }
 }
 
 impl fmt::Display for RelOp {
@@ -309,13 +337,16 @@ macro_rules! stmt {
         Box::new(Stmt::Exp(exp!($($t)+)))
     };
     (jmp $exp:expr, $($label:expr),+ $(,)?) => {
-        Box::new(Stmt::Jump($exp, vec![$($label),+]))
+        stmt!(jmp $exp, vec vec![$($label),+])
+    };
+    (jmp $exp:expr, vec $label:expr $(,)?) => {
+        Box::new(Stmt::Jump($exp, $label))
+    };
+    (label) => {
+        Box::new(Stmt::Label(Label::new()))
     };
     (label $label:expr) => {
         Box::new(Stmt::Label($label))
-    };
-    (newlabel) => {
-        Box::new(Stmt::Label(Label::new()))
     };
     (cjmp <, $left:expr, $right:expr, $true:expr, $false:expr) => {
         stmt!(cjmp RelOp::Lt, $left, $right, $true, $false)

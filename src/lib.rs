@@ -3,6 +3,7 @@
 //! manual](https://www.lrde.epita.fr/~tiger/tiger.html).
 
 pub mod ast;
+mod canon;
 mod env;
 pub mod error_reporter;
 pub mod escapes;
