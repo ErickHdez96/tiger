@@ -576,7 +576,7 @@ impl<F: Frame + PartialEq> Semant<F> {
         let init = self.translate_exp(vars, types, level, init)?;
 
         match &**ty {
-            TigerType::Array(ty) if init.ty.is_assignable_to(ty) => Ok(ExpType::new(
+            TigerType::Array(arr_ty) if init.ty.is_assignable_to(arr_ty) => Ok(ExpType::new(
                 tr::array_creation::<F>(length.exp, init.exp),
                 Rc::clone(ty),
                 span,
