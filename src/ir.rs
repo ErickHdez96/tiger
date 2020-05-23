@@ -18,10 +18,10 @@ pub enum Exp {
     /// before `e2`.
     BinOp(BinOp, Box<Exp>, Box<Exp>),
 
-    /// Contentes of `word_size` bytes of memory starting at address `e` (where `word_size` is
-    /// defined in the frame module).
-    /// Note: When Mem is used as the left child of a `Stmt::Move`, it means "store", but anywhere
-    /// else it means "fetch".
+    /// Contentes of `word_size` bytes of memory starting at address `e` (where
+    /// `word_size` is defined in the frame module).
+    /// Note: When Mem is used as the left child of a `Stmt::Move`, it means "store",
+    /// but anywhere else it means "fetch".
     Mem(Box<Exp>),
 
     /// Procedure call: the application of function `func` to argument list `args`.
@@ -33,6 +33,15 @@ pub enum Exp {
     Eseq(Box<Stmt>, Box<Exp>),
 }
 
+impl Exp {
+    pub fn is_const(&self) -> bool {
+        match self {
+            Exp::Const(_) => true,
+            _ => false,
+        }
+    }
+}
+
 impl fmt::Display for Exp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -40,7 +49,7 @@ impl fmt::Display for Exp {
             Exp::Name(label) => write!(f, "{}", label),
             Exp::Temp(tmp) => write!(f, "t{}", tmp),
             Exp::BinOp(op, left, right) => write!(f, "{} {} {}", left, op, right),
-            Exp::Mem(m) => write!(f, "[{}]", m),
+            Exp::Mem(m) => write!(f, "M[{}]", m),
             Exp::Call { func, args } => write!(
                 f,
                 "{}({})",
@@ -121,11 +130,16 @@ impl fmt::Display for Stmt {
                 s => panic!("Wrongly formed move statement, expected a temporal or memory access, found {:?}", s)
             },
             Stmt::Exp(e) => write!(f, "{};", e),
-            Stmt::Jump(dst, labels) => write!(
+            Stmt::Jump(dst, labels) if labels.len() > 1 => write!(
                 f,
                 "jmp {} {{{}}};",
                 dst,
                 labels.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(", "),
+            ),
+            Stmt::Jump(dst, _) => write!(
+                f,
+                "jmp {}",
+                dst,
             ),
             Stmt::CJump { op, left, right, r#true, r#false } => {
                 write!(f, "{} {} {} ? {} : {}", left, op, right, r#true, r#false)

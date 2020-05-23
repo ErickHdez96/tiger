@@ -2,7 +2,9 @@ use clap::{crate_authors, crate_description, crate_version, App, Arg};
 use std::io;
 use std::path::Path;
 use tiger::{
-    frame::X86_64,
+    canon::{basic_blocks, linearize, trace_schedule},
+    codegen::CodeGen,
+    frame::{Fragment, Frame, X86_64},
     parse, print_compiler_errors,
     terminal::{Color, Style},
     tokenize, translate, SourceFile,
@@ -46,6 +48,16 @@ fn run_main(path: impl AsRef<Path>) -> io::Result<()> {
 
     print_compiler_errors(&errors, &source_file);
 
+    let fragments = match item.map(translate::<X86_64>) {
+        Some(Ok(f)) => f,
+        Some(Err(e)) => {
+            print_compiler_errors(&[e], &source_file);
+            errors_found = true;
+            vec![]
+        }
+        None => vec![],
+    };
+
     if errors_found {
         eprintln!(
             "\n{}{}error:{} Could not compile due to the previous error(s).",
@@ -53,12 +65,29 @@ fn run_main(path: impl AsRef<Path>) -> io::Result<()> {
             Style::Bold,
             Style::Clear,
         );
+        std::process::exit(1);
     }
 
-    if let Some(item) = item {
-        match translate::<X86_64>(item) {
-            Ok(e) => println!("{}", e),
-            Err(e) => print_compiler_errors(&[e], &source_file),
+    for fragment in fragments {
+        match fragment {
+            Fragment::Procedure { body, frame } => {
+                let body = frame.borrow().proc_entry_exit_1(body);
+                let statements = linearize(*body);
+                let (blocks, done_label) = basic_blocks(statements);
+                let statements = trace_schedule(blocks, done_label);
+
+                let mut gen = CodeGen::new();
+                for statement in statements {
+                    gen.munch_stmt(*statement);
+                }
+
+                let instructions = gen.into_instructions();
+                let instructions = frame.borrow().proc_entry_exit_2(instructions);
+                let procedure = frame.borrow().proc_entry_exit_3(instructions);
+
+                println!("{}", procedure);
+            }
+            Fragment::String(label, s) => println!("{}: {}", label, s.as_str()),
         }
     }
 

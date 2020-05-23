@@ -136,11 +136,12 @@ impl<F: Frame + PartialEq> Semant<F> {
                     },
                     None => ty!(self, unit),
                 };
+                let fn_label = Label::new();
                 vars.insert(
                     id.id(),
-                    VarType::new_fn(formals, ret_type, &level, Label::new()),
+                    VarType::new_fn(formals, ret_type, &level, fn_label),
                 );
-                let level = Level::new(&level, Label::new(), &formal_escapes);
+                let level = Level::new(&level, fn_label, &formal_escapes);
                 let mut body_vars = Env::with_parent(vars);
 
                 for (id, escapes, ty) in new_vars {

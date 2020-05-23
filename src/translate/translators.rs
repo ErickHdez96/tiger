@@ -336,8 +336,8 @@ pub fn init_var<F: Frame>(access: &Access<F>, level: &Level<F>, exp: ExpKind) ->
 
 pub fn fn_dec<F: Frame>(body: ExpKind) -> ExpKind {
     ExpKind::Ex(eseq!(
-        stmt!(move exp!(temp F::rv()), un_ex(body));
-        exp!(temp F::rv())
+        stmt!(move exp!(temp F::return_value()), un_ex(body));
+        exp!(temp F::return_value())
     ))
 }
 

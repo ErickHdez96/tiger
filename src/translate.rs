@@ -119,7 +119,7 @@ impl fmt::Display for ExpKind {
 
 #[derive(Debug, Default)]
 pub struct Gen<F: Frame> {
-    fragments: Vec<Fragment<F>>,
+    pub fragments: Vec<Fragment<F>>,
 }
 
 impl<F: Frame> Gen<F> {

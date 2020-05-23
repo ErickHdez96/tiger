@@ -4,12 +4,11 @@ mod ty;
 
 use crate::env::Env;
 use crate::error_reporter::CompilerError;
-use crate::frame::Frame;
-use crate::ir::{Exp, Stmt};
+use crate::frame::{Fragment, Frame};
 use crate::temp::Label;
 use crate::translate::{self, ExpKind, Gen, Level};
 use crate::types::{TigerType, VarType};
-use crate::{exp, stmt, Item, Span, Symbol};
+use crate::{Item, Span, Symbol};
 use std::fmt;
 use std::rc::Rc;
 
@@ -83,7 +82,7 @@ impl fmt::Display for ExpType {
     }
 }
 
-pub fn translate<F: Frame + PartialEq>(item: Item) -> TResult<ExpType> {
+pub fn translate<F: Frame + PartialEq>(item: Item) -> TResult<Vec<Fragment<F>>> {
     let translator = Semant::<F>::new();
     translator.translate(item)
 }
@@ -117,7 +116,7 @@ impl<F: Frame + PartialEq> Semant<F> {
         }
     }
 
-    fn translate(mut self, item: Item) -> TResult<ExpType> {
+    fn translate(mut self, item: Item) -> TResult<Vec<Fragment<F>>> {
         let vars = Env::new();
         let mut types = Env::new();
 
@@ -125,16 +124,21 @@ impl<F: Frame + PartialEq> Semant<F> {
         types.insert(Symbol::intern("string"), ty!(self, str));
 
         match item {
-            Item::Exp(e) => self.translate_exp(&vars, &types, &Rc::clone(&self.outerlevel), &e),
+            Item::Exp(e) => {
+                let body = self.translate_exp(&vars, &types, &Rc::clone(&self.outerlevel), &e)?;
+                self.gen.proc_entry_exit(
+                    &Level::<F>::new(&self.outerlevel, Label::with_name("_main"), &[]),
+                    body.exp,
+                );
+            }
             Item::Decs(decs) => {
-                self.translate_decs(&vars, &types, &Rc::clone(&self.outerlevel), &decs)?;
-                Ok(ExpType::new(
-                    ExpKind::Nx(stmt!(exp exp!(const 0))),
-                    ty!(self, unit),
-                    Span::new(0, 1),
-                ))
+                let (_, _, globals) =
+                    self.translate_decs(&vars, &types, &Rc::clone(&self.outerlevel), &decs)?;
+                self.gen.proc_entry_exit(&self.outerlevel, globals);
             }
         }
+
+        Ok(self.gen.into_result())
     }
 }
 

@@ -2,8 +2,10 @@
 //! Compiler for the Tiger language, as per the [reference
 //! manual](https://www.lrde.epita.fr/~tiger/tiger.html).
 
+mod asm;
 pub mod ast;
-mod canon;
+pub mod canon;
+pub mod codegen;
 mod env;
 pub mod error_reporter;
 pub mod escapes;

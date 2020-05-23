@@ -3,13 +3,17 @@ use std::cell::Cell;
 use std::default::Default;
 use std::fmt;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Temp(u32);
 
 impl Temp {
     /// Create a new Temp, each one is unique and different from the previous one.
     pub fn new() -> Self {
         Self(new_number())
+    }
+
+    pub fn as_u32(self) -> u32 {
+        self.0
     }
 }
 
@@ -38,8 +42,8 @@ impl Label {
     }
 
     /// Create a new label with a given name.
-    pub fn with_name(symbol: Symbol) -> Self {
-        Self::Named(symbol)
+    pub fn with_name(symbol: impl Into<Symbol>) -> Self {
+        Self::Named(symbol.into())
     }
 
     /// Get the name of the current label.

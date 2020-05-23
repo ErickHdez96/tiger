@@ -42,13 +42,19 @@ impl BlocksBuilder {
     }
 
     fn build(mut self) -> Vec<Vec<Box<Stmt>>> {
-        let mut stmts = self.stmts.into_iter();
-        let mut previous_label = Some(stmt!(label Label::new()));
+        let mut stmts = self.stmts.into_iter().peekable();
+        let mut previous_label = None;
 
         'outer: loop {
             let start = match previous_label.take() {
                 Some(label) => label,
-                None => stmt!(label Label::new()),
+                None => stmts
+                    .peek()
+                    .and_then(|s| match s.as_ref() {
+                        Stmt::Label(label) => Some(stmt!(label * label)),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| stmt!(label)),
             };
             let mut block = vec![start];
 
@@ -295,7 +301,7 @@ fn do_stmt(stmt: Stmt) -> Box<Stmt> {
             r#true,
             r#false,
         } => {
-            reorder_stmt(vec![left, right], move |mut exps| stmt!(cjmp op, exps.remove(0), exps.remove(1), r#true, r#false))
+            reorder_stmt(vec![left, right], move |mut exps| stmt!(cjmp op, exps.remove(0), exps.remove(0), r#true, r#false))
         },
         Stmt::Exp(e) => match *e {
             Exp::Call { func, args } => {
