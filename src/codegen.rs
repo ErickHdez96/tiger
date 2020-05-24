@@ -129,23 +129,20 @@ impl CodeGen {
     fn munch_exp(&mut self, exp: Exp) -> Temp {
         let out_temp = Temp::new();
         match exp {
-            Exp::Const(n) => self.emit(Instruction::Op {
+            Exp::Const(n) => self.emit(Instruction::Move {
                 asm: format!("mov 'd0, {}", n),
                 dst: vec![out_temp],
                 src: vec![],
-                jmp: None,
             }),
-            Exp::Name(name) => self.emit(Instruction::Op {
+            Exp::Name(name) => self.emit(Instruction::Move {
                 asm: format!("mov 'd0, {}", name),
                 dst: vec![out_temp],
                 src: vec![],
-                jmp: None,
             }),
-            Exp::Temp(t) => self.emit(Instruction::Op {
+            Exp::Temp(t) => self.emit(Instruction::Move {
                 asm: String::from("mov 'd0, 's0"),
                 dst: vec![out_temp],
                 src: vec![t],
-                jmp: None,
             }),
             // A Memory expression on the right of a Move statement (store), is handled by
             // munch_stmt, meaning this is fetch.
@@ -264,14 +261,31 @@ impl CodeGen {
                     });
                 }
             },
-            Exp::Temp(t) => {
-                let src_reg = self.munch_exp(src);
-                self.emit(Instruction::Move {
-                    asm: String::from("mov 'd0, 's0"),
-                    dst: vec![t],
-                    src: vec![src_reg],
-                });
-            }
+            Exp::Temp(t) => match src {
+                Exp::Const(n) if n == 0 => {
+                    self.emit(Instruction::Op {
+                        asm: String::from("xor 'd0, 'd0"),
+                        dst: vec![t],
+                        src: vec![],
+                        jmp: None,
+                    });
+                }
+                Exp::Const(n) => {
+                    self.emit(Instruction::Move {
+                        asm: format!("mov 'd0, {}", n),
+                        dst: vec![t],
+                        src: vec![],
+                    });
+                }
+                src => {
+                    let src_reg = self.munch_exp(src);
+                    self.emit(Instruction::Move {
+                        asm: String::from("mov 'd0, 's0"),
+                        dst: vec![t],
+                        src: vec![src_reg],
+                    });
+                }
+            },
             d => panic!("Wrongly created move statement: {:?}", d),
         }
     }
@@ -279,49 +293,87 @@ impl CodeGen {
     fn munch_bin_op(&mut self, op: BinOp, left: Exp, right: Exp, out_temp: Temp) {
         // TODO: Optimize for constants
         match op {
-            BinOp::Plus | BinOp::Minus => {
-                let op = if op == BinOp::Plus { "add" } else { "sub" };
-                let left_reg = self.munch_exp(left);
-                let right_reg = self.munch_exp(right);
-                self.emit(Instruction::Move {
-                    asm: String::from("mov 'd0, 's0"),
-                    src: vec![left_reg],
-                    dst: vec![out_temp],
-                });
-                self.emit(Instruction::Op {
-                    asm: format!("{} 'd0, 's0", op),
-                    src: vec![out_temp, right_reg],
-                    dst: vec![out_temp],
-                    jmp: None,
-                });
-            }
-            BinOp::Mul => {
-                let left_reg = self.munch_exp(left);
-                let right_reg = self.munch_exp(right);
-                self.emit(Instruction::Move {
-                    asm: String::from("mov 'd0, 's0"),
-                    src: vec![left_reg],
-                    dst: vec![X86_64::rax()],
-                });
-                self.emit(Instruction::Op {
-                    asm: String::from("mul 's0"),
-                    src: vec![right_reg, X86_64::rax()],
-                    dst: vec![X86_64::rax(), X86_64::rdx()],
-                    jmp: None,
-                });
-                self.emit(Instruction::Move {
-                    asm: String::from("mov 'd0, 's0"),
-                    src: vec![X86_64::rax()],
-                    dst: vec![out_temp],
-                });
-            }
+            BinOp::Plus | BinOp::Minus => match (op, left, right) {
+                (BinOp::Plus, Exp::Temp(t), Exp::Const(n))
+                | (BinOp::Plus, Exp::Const(n), Exp::Temp(t)) => {
+                    self.emit(Instruction::Op {
+                        asm: format!("lea 'd0, ['s0 + {}]", n),
+                        src: vec![t],
+                        dst: vec![out_temp],
+                        jmp: None,
+                    });
+                }
+                (BinOp::Plus, Exp::Temp(lt), Exp::Temp(rt)) => {
+                    self.emit(Instruction::Op {
+                        asm: String::from("lea 'd0, ['s0 + 's1]"),
+                        src: vec![lt, rt],
+                        dst: vec![out_temp],
+                        jmp: None,
+                    });
+                }
+                (op, left, right) => {
+                    let op = if op == BinOp::Plus { "add" } else { "sub" };
+                    let left_reg = self.munch_exp(left);
+                    let right_reg = self.munch_exp(right);
+                    self.emit(Instruction::Move {
+                        asm: String::from("mov 'd0, 's0"),
+                        src: vec![left_reg],
+                        dst: vec![out_temp],
+                    });
+                    self.emit(Instruction::Op {
+                        asm: format!("{} 'd0, 's0", op),
+                        src: vec![out_temp, right_reg],
+                        dst: vec![out_temp],
+                        jmp: None,
+                    });
+                }
+            },
+            BinOp::Mul => match (left, right) {
+                (Exp::Const(n), Exp::Temp(t)) | (Exp::Temp(t), Exp::Const(n)) => {
+                    if n % 2 == 0 && n <= 8 {
+                        self.emit(Instruction::Op {
+                            asm: format!("lea 'd0, ['s0 * {}]", n),
+                            src: vec![t],
+                            dst: vec![out_temp],
+                            jmp: None,
+                        });
+                    } else {
+                        self.emit(Instruction::Op {
+                            asm: format!("imul 'd0, 's0, {}", n),
+                            src: vec![t],
+                            dst: vec![out_temp],
+                            jmp: None,
+                        });
+                    }
+                }
+                (left, right) => {
+                    let left_reg = self.munch_exp(left);
+                    let right_reg = self.munch_exp(right);
+                    self.emit(Instruction::Move {
+                        asm: String::from("mov 'd0, 's0"),
+                        src: vec![left_reg],
+                        dst: vec![X86_64::rax()],
+                    });
+                    self.emit(Instruction::Op {
+                        asm: String::from("mul 's0"),
+                        src: vec![right_reg, X86_64::rax()],
+                        dst: vec![X86_64::rax(), X86_64::rdx()],
+                        jmp: None,
+                    });
+                    self.emit(Instruction::Move {
+                        asm: String::from("mov 'd0, 's0"),
+                        src: vec![X86_64::rax()],
+                        dst: vec![out_temp],
+                    });
+                }
+            },
             BinOp::Div => {
                 let left_reg = self.munch_exp(left);
                 let right_reg = self.munch_exp(right);
                 // RDX:RAX is the dividend, meaning we have to clear RDX.
                 self.emit(Instruction::Op {
-                    asm: String::from("xor 'd0, 's0"),
-                    src: vec![X86_64::rdx()],
+                    asm: String::from("xor 'd0, 'd0"),
+                    src: vec![],
                     dst: vec![X86_64::rdx()],
                     jmp: None,
                 });
@@ -361,5 +413,177 @@ impl fmt::Display for Procedure {
             writeln!(f, "{}", instruction)?;
         }
         write!(f, "{}", self.epilog)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::temp::Label;
+    use crate::{exp, stmt};
+
+    #[test]
+    fn test_basic_codegen() {
+        let a = Temp::new();
+        let b = Temp::new();
+        let c = Temp::new();
+        let loop_label = Label::with_name("loop");
+        let end_label = Label::with_name("end");
+        let mut gen = CodeGen::new();
+
+        // a := 0
+        gen.munch_stmt(*stmt!(move exp!(temp a), exp!(const 0)));
+        // loop:
+        gen.munch_stmt(*stmt!(label loop_label));
+        // b := a + 1
+        gen.munch_stmt(*stmt!(move exp!(temp b), exp!(+ exp!(temp a), exp!(const 1))));
+        // c := c + b
+        gen.munch_stmt(*stmt!(move exp!(temp c), exp!(+ exp!(temp c), exp!(temp b))));
+        // a := b * 2
+        gen.munch_stmt(*stmt!(move exp!(temp a), exp!(* exp!(temp b), exp!(const 2))));
+        // a := b * 2
+        gen.munch_stmt(*stmt!(cjmp <, exp!(temp a), exp!(const 10), loop_label, end_label));
+        // end:
+        gen.munch_stmt(*stmt!(label end_label));
+
+        let instructions = gen.into_instructions();
+        // a := 0
+        assert_eq!(
+            instructions[0],
+            Instruction::Op {
+                asm: String::from("xor 'd0, 'd0"),
+                src: vec![],
+                dst: vec![a],
+                jmp: None,
+            }
+        );
+
+        // loop:
+        assert_eq!(
+            instructions[1],
+            Instruction::Label {
+                asm: format!("{}:", loop_label),
+                label: loop_label,
+            }
+        );
+
+        // tmp := a + 1
+        let tmp = match &instructions[2] {
+            Instruction::Op { asm, dst, src, jmp } => {
+                assert_eq!(asm, "lea 'd0, ['s0 + 1]");
+                assert_eq!(src, &[a]);
+                assert_eq!(dst.len(), 1);
+                assert_eq!(*jmp, None);
+                dst[0]
+            }
+            s => panic!("Expected a op instruction {:?}", s),
+        };
+
+        // b := tmp
+        assert_eq!(
+            instructions[3],
+            Instruction::Move {
+                asm: String::from("mov 'd0, 's0"),
+                dst: vec![b],
+                src: vec![tmp],
+            }
+        );
+
+        // tmp := c + b
+        let tmp = match &instructions[4] {
+            Instruction::Op { asm, dst, src, jmp } => {
+                assert_eq!(asm, "lea 'd0, ['s0 + 's1]");
+                assert_eq!(src, &[c, b]);
+                assert_eq!(dst.len(), 1);
+                assert_eq!(*jmp, None);
+                dst[0]
+            }
+            s => panic!("Expected a op instruction {:?}", s),
+        };
+
+        // c := tmp
+        assert_eq!(
+            instructions[5],
+            Instruction::Move {
+                asm: String::from("mov 'd0, 's0"),
+                src: vec![tmp],
+                dst: vec![c],
+            }
+        );
+
+        // tmp := b * 2
+        let tmp = match &instructions[6] {
+            Instruction::Op { asm, dst, src, jmp } => {
+                assert_eq!(asm, "lea 'd0, ['s0 * 2]");
+                assert_eq!(src, &[b]);
+                assert_eq!(dst.len(), 1);
+                assert_eq!(*jmp, None);
+                dst[0]
+            }
+            s => panic!("Expected a op instruction {:?}", s),
+        };
+
+        // a := tmp
+        assert_eq!(
+            instructions[7],
+            Instruction::Move {
+                asm: String::from("mov 'd0, 's0"),
+                src: vec![tmp],
+                dst: vec![a],
+            }
+        );
+
+        // tmp1 := a
+        let tmp1 = match &instructions[8] {
+            Instruction::Move { asm, dst, src } => {
+                assert_eq!(asm, "mov 'd0, 's0");
+                assert_eq!(src[0], a);
+                assert_eq!(dst.len(), 1);
+                dst[0]
+            }
+            s => panic!("Expected a op instruction {:?}", s),
+        };
+
+        // tmp2 := 10
+        let tmp2 = match &instructions[9] {
+            Instruction::Move { asm, dst, src } => {
+                assert_eq!(asm, "mov 'd0, 10");
+                assert!(src.is_empty());
+                assert_eq!(dst.len(), 1);
+                dst[0]
+            }
+            s => panic!("Expected a op instruction {:?}", s),
+        };
+
+        // cmp tmp1, tmp2
+        assert_eq!(
+            instructions[10],
+            Instruction::Op {
+                asm: String::from("cmp 's0, 's1"),
+                src: vec![tmp1, tmp2],
+                dst: vec![],
+                jmp: None,
+            }
+        );
+
+        // jl loop # if tmp1 < tmp2, jmp loop
+        assert_eq!(
+            instructions[11],
+            Instruction::Op {
+                asm: format!("jl {}", loop_label),
+                src: vec![],
+                dst: vec![],
+                jmp: Some(vec![loop_label, end_label]),
+            }
+        );
+
+        // end:
+        assert_eq!(
+            instructions[12],
+            Instruction::Label {
+                asm: format!("{}:", end_label),
+                label: end_label,
+            }
+        );
     }
 }

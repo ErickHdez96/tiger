@@ -4,6 +4,7 @@ use std::path::Path;
 use tiger::{
     canon::{basic_blocks, linearize, trace_schedule},
     codegen::CodeGen,
+    flow::instructions_to_graph,
     frame::{Fragment, Frame, X86_64},
     parse, print_compiler_errors,
     terminal::{Color, Style},
@@ -83,6 +84,7 @@ fn run_main(path: impl AsRef<Path>) -> io::Result<()> {
 
                 let instructions = gen.into_instructions();
                 let instructions = frame.borrow().proc_entry_exit_2(instructions);
+                dbg!(instructions_to_graph(&instructions));
                 let procedure = frame.borrow().proc_entry_exit_3(instructions);
 
                 println!("{}", procedure);

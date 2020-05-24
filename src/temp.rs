@@ -29,7 +29,7 @@ impl fmt::Display for Temp {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Label {
     Named(Symbol),
     Num(u32),

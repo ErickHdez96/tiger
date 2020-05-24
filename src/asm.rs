@@ -2,7 +2,7 @@ use crate::frame::X86_64;
 use crate::temp::{Label, Temp};
 use std::fmt;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Instruction {
     Op {
         asm: String,
@@ -19,6 +19,15 @@ pub enum Instruction {
         dst: Vec<Temp>,
         src: Vec<Temp>,
     },
+}
+
+impl Instruction {
+    pub fn is_move(&self) -> bool {
+        match self {
+            Self::Move { .. } => true,
+            _ => false,
+        }
+    }
 }
 
 impl fmt::Display for Instruction {
